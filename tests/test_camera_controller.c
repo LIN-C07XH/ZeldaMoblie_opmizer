@@ -4,6 +4,9 @@
 #include <math.h>
 #include <stdbool.h>
 
+static bool s_mockIsMovie = false;
+bool zelda_is_movie(void) { return s_mockIsMovie; }
+
 #include "camera_controller.h"
 #include "camera_controller.inc"
 
@@ -216,6 +219,49 @@ static void testLockDragTargetSwitch(void) {
     printf("[PASS] testLockDragTargetSwitch\n");
 }
 
+static void testSharedStateAndMovieBypass(void) {
+    cameraInit();
+    ZeldaCameraSharedState shared;
+    memset(&shared, 0, sizeof(shared));
+    memcpy(shared.magic, "CAM1", 4);
+    shared.lookAtX = 100.0;
+    shared.lookAtY = 20.0;
+    shared.lookAtZ = 100.0;
+    shared.origEyeX = 100.0;
+    shared.origEyeY = 22.0;
+    shared.origEyeZ = 104.8;
+    shared.active = 0;
+
+    cameraBindSharedState(&shared);
+
+    // 未进入游戏且未捕获鼠标：active 应为 0
+    cameraSetGameplayActive(false);
+    cameraSetMouseCaptured(false);
+    cameraFrameSync();
+    assert(shared.active == 0);
+
+    // 进入游玩状态并捕获鼠标：active 激活为 1，且 overrideEye 写入有效坐标
+    cameraSetGameplayActive(true);
+    cameraSetMouseCaptured(true);
+    s_mockIsMovie = false;
+    cameraFrameSync();
+    assert(shared.active == 1);
+    assert(fabs(shared.overrideEyeY - 20.0) > 0.1);
+
+    // 进入剧情过场动画 (movie_flag = 1)：active 必须立刻置 0，彻底放行原版镜头！
+    s_mockIsMovie = true;
+    cameraFrameSync();
+    assert(shared.active == 0);
+
+    // 过场结束退出：active 恢复为 1
+    s_mockIsMovie = false;
+    cameraFrameSync();
+    assert(shared.active == 1);
+
+    cameraBindSharedState(NULL);
+    printf("[PASS] testSharedStateAndMovieBypass\n");
+}
+
 int main(void) {
     printf("====== 运行纯净方案 A SpringArm 单元测试 ======\n");
     testCameraInit();
@@ -226,6 +272,7 @@ int main(void) {
     testSpringArmCollisionSafeDistance();
     testSpringArmZoomInOut();
     testLockDragTargetSwitch();
+    testSharedStateAndMovieBypass();
     printf("====== 所有纯净方案 A 单元测试全部通过！ ======\n");
     return 0;
 }

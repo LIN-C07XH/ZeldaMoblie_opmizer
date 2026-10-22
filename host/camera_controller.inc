@@ -63,6 +63,110 @@ static CameraState globalCameraState = {
     }
 };
 
+typedef struct {
+    char magic[8];              // "CAM1\0\0\0\0"
+    uint32_t active;            // 1 = 启用 SpringArm 接管, 0 = 原始放行
+    uint32_t reserved;
+    double overrideEyeX;        // 宿主写入
+    double overrideEyeY;
+    double overrideEyeZ;
+    double lookAtX;             // 客体写入
+    double lookAtY;
+    double lookAtZ;
+    double origEyeX;            // 客体写入
+    double origEyeY;
+    double origEyeZ;
+} __attribute__((packed)) ZeldaCameraSharedState;
+_Static_assert(sizeof(ZeldaCameraSharedState) == 0x58, "ZeldaCameraSharedState size must be 0x58");
+
+static volatile ZeldaCameraSharedState *g_sharedCameraState = NULL;
+
+void cameraBindSharedState(void *statePtr) {
+    pthread_mutex_lock(&cameraLock);
+    if (statePtr) {
+        g_sharedCameraState = (volatile ZeldaCameraSharedState *)statePtr;
+        fprintf(stderr, "[CAMERA_HOOK] Connected to guest shared camera state at %p (magic=%.4s)\n",
+                statePtr, g_sharedCameraState->magic);
+    } else {
+        g_sharedCameraState = NULL;
+    }
+    pthread_mutex_unlock(&cameraLock);
+}
+
+static void cameraUpdateSharedStateLocked(void) {
+    if (!g_sharedCameraState) return;
+    if (memcmp((const void *)g_sharedCameraState->magic, "CAM1", 4) != 0) return;
+
+    double lookX = g_sharedCameraState->lookAtX;
+    double lookY = g_sharedCameraState->lookAtY;
+    double lookZ = g_sharedCameraState->lookAtZ;
+    double origEyeX = g_sharedCameraState->origEyeX;
+    double origEyeY = g_sharedCameraState->origEyeY;
+    double origEyeZ = g_sharedCameraState->origEyeZ;
+
+    // 检查客体坐标是否有效
+    double dx = origEyeX - lookX;
+    double dy = origEyeY - lookY;
+    double dz = origEyeZ - lookZ;
+    double dist = sqrt(dx * dx + dy * dy + dz * dz);
+    bool validGuestCoords = (dist > 0.2 && dist < 500.0 && isfinite(dist) && fabs(lookY) > 0.001);
+
+    bool isMovie = false;
+#ifndef UNIT_TEST
+    extern bool zelda_is_movie(void);
+    isMovie = zelda_is_movie();
+#endif
+
+    if (!globalCameraState.hasInitialSync && validGuestCoords) {
+        globalCameraState.currentYaw = (float)atan2(dx, dz);
+        while (globalCameraState.currentYaw < 0.0f) globalCameraState.currentYaw += 2.0f * (float)M_PI;
+        double sinP = dy / dist;
+        if (sinP > 0.99) sinP = 0.99;
+        if (sinP < -0.99) sinP = -0.99;
+        globalCameraState.currentPitch = (float)asin(sinP);
+        globalCameraState.targetDistance = (float)dist;
+        globalCameraState.hasInitialSync = true;
+    }
+
+    if (globalCameraState.mouseCaptured && globalCameraState.isGameplayActive && validGuestCoords && !isMovie) {
+        float effectiveDist = globalCameraState.targetDistance;
+        float yaw = globalCameraState.currentYaw;
+        float pitch = globalCameraState.currentPitch;
+        float cosPitch = cosf(pitch);
+
+        double newEyeX = lookX + (double)(effectiveDist * cosPitch * sinf(yaw));
+        double newEyeY = lookY + (double)(effectiveDist * sinf(pitch));
+        double newEyeZ = lookZ + (double)(effectiveDist * cosPitch * cosf(yaw));
+
+        if (isfinite(newEyeX) && isfinite(newEyeY) && isfinite(newEyeZ)) {
+            g_sharedCameraState->overrideEyeX = newEyeX;
+            g_sharedCameraState->overrideEyeY = newEyeY;
+            g_sharedCameraState->overrideEyeZ = newEyeZ;
+            g_sharedCameraState->active = 1; // 激活客体改写
+        } else {
+            g_sharedCameraState->active = 0;
+        }
+    } else {
+        // 未捕获或非游玩状态或过场动画：静默跟踪客体，并将 active 设为 0 放行原版
+        g_sharedCameraState->active = 0;
+        if (validGuestCoords) {
+            globalCameraState.currentYaw = (float)atan2(dx, dz);
+            while (globalCameraState.currentYaw < 0.0f) globalCameraState.currentYaw += 2.0f * (float)M_PI;
+            double sinP = dy / dist;
+            if (sinP > 0.99) sinP = 0.99;
+            if (sinP < -0.99) sinP = -0.99;
+            globalCameraState.currentPitch = (float)asin(sinP);
+        }
+    }
+}
+
+void cameraFrameSync(void) {
+    if (!g_sharedCameraState) return;
+    pthread_mutex_lock(&cameraLock);
+    cameraUpdateSharedStateLocked();
+    pthread_mutex_unlock(&cameraLock);
+}
+
 void cameraInit(void) {
     pthread_mutex_lock(&cameraLock);
     globalCameraState.mouseCaptured = false;
@@ -137,6 +241,7 @@ void cameraAddMouseDelta(float deltaX, float deltaY) {
                 globalCameraState.isTargetLocked = true;
             }
         }
+        cameraUpdateSharedStateLocked();
     }
     pthread_mutex_unlock(&cameraLock);
 }
@@ -268,6 +373,7 @@ void cameraAddZoom(float deltaZoom) {
     if (globalCameraState.targetDistance > MAX_SPRING_ARM_DISTANCE) {
         globalCameraState.targetDistance = MAX_SPRING_ARM_DISTANCE;
     }
+    cameraUpdateSharedStateLocked();
     pthread_mutex_unlock(&cameraLock);
 }
 
@@ -361,6 +467,7 @@ void cameraHandleLockDragButton(bool pressed) {
                 globalCameraState.isTargetLocked = !globalCameraState.isTargetLocked;
             }
         }
+        cameraUpdateSharedStateLocked();
     }
     pthread_mutex_unlock(&cameraLock);
 }
@@ -382,6 +489,7 @@ void cameraFeedMouseMovementForTargetSwitch(float deltaX) {
             globalCameraState.lockDragAccumX = 0.0f;
             globalCameraState.isTargetLocked = true;
         }
+        cameraUpdateSharedStateLocked();
     }
     pthread_mutex_unlock(&cameraLock);
 }
@@ -395,6 +503,7 @@ uint64_t cameraGetTargetLockButtons(void) {
         } else {
             btn = ZL_BUTTON_MASK;
         }
+        cameraUpdateSharedStateLocked();
     }
     pthread_mutex_unlock(&cameraLock);
     return btn;

@@ -45,6 +45,7 @@ static CVReturn display_refresh(CVDisplayLinkRef link, const CVTimeStamp *now,
     uint64_t slot = now_ns() / 16666667;
     if (slot != previous_slot) {
         previous_slot = slot;
+        cameraFrameSync();
         uint64_t regs[31] = {vsync_write};
         if (!kernel_svc(0x11, regs) || regs[0]) abort();
     }

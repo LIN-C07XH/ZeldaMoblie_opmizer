@@ -78,6 +78,12 @@ bool cameraIsGameplayActive(void);
 /// 记录物理手柄正在输入（手柄最高优先级机制，避免键鼠与手柄冲突）
 void cameraNoteGamepadActivity(void);
 
+/// 绑定与客体 main 模块的共享内存状态页 (0x3ae4040)
+void cameraBindSharedState(void *statePtr);
+
+/// 每一帧刷新宿主与客体相机的双向数据同步 (计算 Eye 坐标并写入共享内存)
+void cameraFrameSync(void);
+
 /// 方案 A：SpringArm 极坐标直接变换更新函数
 /// 拦截并更新当前相机的 Eye 坐标，结合鼠标/触屏当前累积的 Yaw/Pitch 和原生避障距离计算新的 Eye 位置
 /// @param ioEyeX 相机世界坐标 X 指针（输入原始值，输出计算后的新值）
