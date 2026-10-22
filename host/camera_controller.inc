@@ -6,14 +6,9 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#define DEFAULT_SENSITIVITY_X 3.6f
-#define DEFAULT_SENSITIVITY_Y 3.0f
+#define DEFAULT_SENSITIVITY_X 3.2f
+#define DEFAULT_SENSITIVITY_Y 2.8f
 #define DEFAULT_ACCEL_FACTOR 0.035f
-#define DEFAULT_DECAY_FACTOR 0.82f
-#define MAX_STICK_VALUE 32767.0f
-#define MAX_BUFFER_CAP 2048.0f
-#define STICK_DRAIN_RATE 16.0f
-#define STICK_SCALE_FACTOR (MAX_STICK_VALUE / STICK_DRAIN_RATE)
 #define ZL_BUTTON_MASK (1u << 8)
 #define SWITCH_PULSE_DURATION 3
 #define SWITCH_DRAG_THRESHOLD 28.0f
@@ -26,12 +21,6 @@
 #define ANGLE_RADIAN_SCALE 0.0022f
 
 typedef struct {
-    float pendingDeltaX;
-    float pendingDeltaY;
-    float bufferX;
-    float bufferY;
-    float currentVelocityX;
-    float currentVelocityY;
     bool mouseCaptured;
     bool isTargetLocked;
     int switchPulseTicks;
@@ -41,10 +30,10 @@ typedef struct {
     bool lockHasSwitchedInPress;
     bool isGameplayActive;
 
-    // 方案 A：SpringArm 极坐标绝对状态
-    float currentYaw;          // 水平旋转角 (弧度)
-    float currentPitch;        // 垂直俯仰角 (弧度)
-    float targetDistance;      // 目标弹簧臂长 (米)
+    // 方案 A：SpringArm 极坐标纯净绝对状态 (无蓄水池、无漏桶、无时间延迟)
+    float currentYaw;          // 水平旋转角 (弧度，0 ~ 2PI 循环)
+    float currentPitch;        // 垂直俯仰角 (弧度，-1.45 ~ +1.45 钳位)
+    float targetDistance;      // 目标弹簧臂长 (米，默认 4.8m)
     bool hasInitialSync;       // 是否已与客体相机初始对齐
 
     CameraConfig config;
@@ -52,12 +41,6 @@ typedef struct {
 
 static pthread_mutex_t cameraLock = PTHREAD_MUTEX_INITIALIZER;
 static CameraState globalCameraState = {
-    .pendingDeltaX = 0.0f,
-    .pendingDeltaY = 0.0f,
-    .bufferX = 0.0f,
-    .bufferY = 0.0f,
-    .currentVelocityX = 0.0f,
-    .currentVelocityY = 0.0f,
     .mouseCaptured = false,
     .isTargetLocked = false,
     .switchPulseTicks = 0,
@@ -74,7 +57,7 @@ static CameraState globalCameraState = {
         .mouseSensitivityX = DEFAULT_SENSITIVITY_X,
         .mouseSensitivityY = DEFAULT_SENSITIVITY_Y,
         .accelerationFactor = DEFAULT_ACCEL_FACTOR,
-        .decayFactor = DEFAULT_DECAY_FACTOR,
+        .decayFactor = 0.0f,
         .invertY = false,
         .rawMouseMode = true,
     }
@@ -82,12 +65,6 @@ static CameraState globalCameraState = {
 
 void cameraInit(void) {
     pthread_mutex_lock(&cameraLock);
-    globalCameraState.pendingDeltaX = 0.0f;
-    globalCameraState.pendingDeltaY = 0.0f;
-    globalCameraState.bufferX = 0.0f;
-    globalCameraState.bufferY = 0.0f;
-    globalCameraState.currentVelocityX = 0.0f;
-    globalCameraState.currentVelocityY = 0.0f;
     globalCameraState.mouseCaptured = false;
     globalCameraState.isTargetLocked = false;
     globalCameraState.switchPulseTicks = 0;
@@ -105,12 +82,6 @@ void cameraInit(void) {
 
 void cameraReset(void) {
     pthread_mutex_lock(&cameraLock);
-    globalCameraState.pendingDeltaX = 0.0f;
-    globalCameraState.pendingDeltaY = 0.0f;
-    globalCameraState.bufferX = 0.0f;
-    globalCameraState.bufferY = 0.0f;
-    globalCameraState.currentVelocityX = 0.0f;
-    globalCameraState.currentVelocityY = 0.0f;
     globalCameraState.switchPulseTicks = 0;
     globalCameraState.switchDirection = 0;
     globalCameraState.hasInitialSync = false;
@@ -128,6 +99,7 @@ void cameraAddMouseDelta(float deltaX, float deltaY) {
             accel = 1.0f + globalCameraState.config.accelerationFactor * speed;
         }
 
+        // 统一物理朝向：macOS 向上推鼠标 deltaY < 0，校准为抬头 (pitch 增加)
         float correctedY = -deltaY;
         if (globalCameraState.config.invertY) {
             correctedY = -correctedY;
@@ -136,7 +108,7 @@ void cameraAddMouseDelta(float deltaX, float deltaY) {
         float scaledX = deltaX * globalCameraState.config.mouseSensitivityX * accel;
         float scaledY = correctedY * globalCameraState.config.mouseSensitivityY * accel;
 
-        // 1. 更新 SpringArm 极坐标角度 (1:1 绝对零延迟跟手)
+        // 方案 A 直接驱动：鼠标移动瞬间累加弧度，无蓄水池，无排队滞后！
         float dYaw = scaledX * ANGLE_RADIAN_SCALE;
         float dPitch = scaledY * ANGLE_RADIAN_SCALE;
 
@@ -148,7 +120,7 @@ void cameraAddMouseDelta(float deltaX, float deltaY) {
         if (globalCameraState.currentPitch > MAX_PITCH_LIMIT) globalCameraState.currentPitch = MAX_PITCH_LIMIT;
         if (globalCameraState.currentPitch < MIN_PITCH_LIMIT) globalCameraState.currentPitch = MIN_PITCH_LIMIT;
 
-        // 2. 长按锁定键期间横向位移累积切怪检测
+        // 长按锁定键期间横向位移切怪检测
         if (globalCameraState.isLockDragKeyDown) {
             globalCameraState.lockDragAccumX += deltaX;
             if (globalCameraState.lockDragAccumX >= SWITCH_DRAG_THRESHOLD) {
@@ -165,10 +137,6 @@ void cameraAddMouseDelta(float deltaX, float deltaY) {
                 globalCameraState.isTargetLocked = true;
             }
         }
-
-        // 3. 供传统手柄轮询的 pending 增量
-        globalCameraState.pendingDeltaX += scaledX;
-        globalCameraState.pendingDeltaY += scaledY;
     }
     pthread_mutex_unlock(&cameraLock);
 }
@@ -183,10 +151,11 @@ void cameraAddTouchDelta(float deltaX, float deltaY) {
     if (globalCameraState.config.invertY) {
         correctedY = -correctedY;
     }
+
     float scaledX = deltaX * globalCameraState.config.mouseSensitivityX * accel;
     float scaledY = correctedY * globalCameraState.config.mouseSensitivityY * accel;
 
-    // 1. 更新 SpringArm 极坐标角度
+    // 移动端划屏直接驱动极坐标
     float dYaw = scaledX * ANGLE_RADIAN_SCALE;
     float dPitch = scaledY * ANGLE_RADIAN_SCALE;
 
@@ -198,8 +167,6 @@ void cameraAddTouchDelta(float deltaX, float deltaY) {
     if (globalCameraState.currentPitch > MAX_PITCH_LIMIT) globalCameraState.currentPitch = MAX_PITCH_LIMIT;
     if (globalCameraState.currentPitch < MIN_PITCH_LIMIT) globalCameraState.currentPitch = MIN_PITCH_LIMIT;
 
-    globalCameraState.pendingDeltaX += scaledX;
-    globalCameraState.pendingDeltaY += scaledY;
     pthread_mutex_unlock(&cameraLock);
 }
 
@@ -210,7 +177,7 @@ void cameraUpdateSpringArm(double *ioEyeX, double *ioEyeY, double *ioEyeZ,
 
     pthread_mutex_lock(&cameraLock);
 
-    // 若尚未对齐初值：从游戏现有的 Eye 与 LookAt 反求当前 Yaw/Pitch
+    // 首次调用或重置初值：从客体现有的真实 Eye 与 LookAt 反求当前 Yaw/Pitch
     if (!globalCameraState.hasInitialSync) {
         double dx = *ioEyeX - lookAtX;
         double dy = *ioEyeY - lookAtY;
@@ -228,10 +195,9 @@ void cameraUpdateSpringArm(double *ioEyeX, double *ioEyeY, double *ioEyeZ,
         }
     }
 
-    // 在捕获状态且已同步时，执行绝对视角变换
     if (globalCameraState.mouseCaptured && globalCameraState.hasInitialSync) {
         float effectiveDist = globalCameraState.targetDistance;
-        // 原生碰撞避障检测距离接入：若碰到障碍物自动收缩距离防穿墙
+        // 原生碰撞避障联动：若碰到障碍物自动收缩臂长防穿墙
         if (collisionDistance > 0.1f && collisionDistance < effectiveDist) {
             effectiveDist = collisionDistance;
         }
@@ -250,7 +216,7 @@ void cameraUpdateSpringArm(double *ioEyeX, double *ioEyeY, double *ioEyeZ,
             *ioEyeZ = newEyeZ;
         }
     } else {
-        // 未捕获光标时持续静默跟踪游戏朝向，保证再次点击进入时无缝平滑
+        // 未捕获光标时持续静默跟踪游戏原生朝向，下一次捕获时绝不发生镜头突兀跳变
         double dx = *ioEyeX - lookAtX;
         double dy = *ioEyeY - lookAtY;
         double dz = *ioEyeZ - lookAtZ;
@@ -316,98 +282,30 @@ bool cameraPoll(int32_t *outRx, int32_t *outRy) {
 
     pthread_mutex_lock(&cameraLock);
 
-    if (!globalCameraState.isGameplayActive) {
-        globalCameraState.pendingDeltaX = 0.0f;
-        globalCameraState.pendingDeltaY = 0.0f;
-        globalCameraState.bufferX = 0.0f;
-        globalCameraState.bufferY = 0.0f;
-        globalCameraState.currentVelocityX = 0.0f;
-        globalCameraState.currentVelocityY = 0.0f;
-        pthread_mutex_unlock(&cameraLock);
-        return false;
-    }
+    // 方案 A 模式：手柄右摇杆彻底断开，保持绝对为 0，杜绝摇杆与 SpringArm 竞争！
+    *outRx = 0;
+    *outRy = 0;
 
-    // 优先响应智能切怪微脉冲
+    // 仅在切怪脉冲触发时输出切怪瞬时脉冲
     if (globalCameraState.switchPulseTicks > 0) {
         int ticks = globalCameraState.switchPulseTicks--;
         int dir = globalCameraState.switchDirection;
         if (ticks == SWITCH_PULSE_DURATION) {
-            *outRx = (int32_t)(dir * MAX_STICK_VALUE);
-            *outRy = 0;
+            *outRx = dir * 32767;
         } else if (ticks == 2) {
-            *outRx = (int32_t)(dir * 20000.0f);
-            *outRy = 0;
-        } else {
-            *outRx = 0;
-            *outRy = 0;
+            *outRx = dir * 20000;
         }
         pthread_mutex_unlock(&cameraLock);
         return true;
     }
 
-    globalCameraState.bufferX += globalCameraState.pendingDeltaX;
-    globalCameraState.bufferY += globalCameraState.pendingDeltaY;
-    globalCameraState.pendingDeltaX = 0.0f;
-    globalCameraState.pendingDeltaY = 0.0f;
-
-    // 大幅放宽蓄水池上限，杜绝快甩鼠标吃位移
-    if (globalCameraState.bufferX > MAX_BUFFER_CAP) globalCameraState.bufferX = MAX_BUFFER_CAP;
-    if (globalCameraState.bufferX < -MAX_BUFFER_CAP) globalCameraState.bufferX = -MAX_BUFFER_CAP;
-    if (globalCameraState.bufferY > MAX_BUFFER_CAP) globalCameraState.bufferY = MAX_BUFFER_CAP;
-    if (globalCameraState.bufferY < -MAX_BUFFER_CAP) globalCameraState.bufferY = -MAX_BUFFER_CAP;
-
-    bool hasBuffer = (fabsf(globalCameraState.bufferX) > 0.01f || fabsf(globalCameraState.bufferY) > 0.01f);
-
-    if (!hasBuffer) {
-        globalCameraState.currentVelocityX *= 0.5f;
-        globalCameraState.currentVelocityY *= 0.5f;
-        if (fabsf(globalCameraState.currentVelocityX) < 100.0f) globalCameraState.currentVelocityX = 0.0f;
-        if (fabsf(globalCameraState.currentVelocityY) < 100.0f) globalCameraState.currentVelocityY = 0.0f;
-
-        *outRx = (int32_t)lroundf(globalCameraState.currentVelocityX);
-        *outRy = (int32_t)lroundf(globalCameraState.currentVelocityY);
-        bool active = (*outRx != 0 || *outRy != 0);
-        pthread_mutex_unlock(&cameraLock);
-        return active;
-    }
-
-    float targetStickX = globalCameraState.bufferX * STICK_SCALE_FACTOR;
-    float targetStickY = globalCameraState.bufferY * STICK_SCALE_FACTOR;
-
-    if (targetStickX > MAX_STICK_VALUE) targetStickX = MAX_STICK_VALUE;
-    if (targetStickX < -MAX_STICK_VALUE) targetStickX = -MAX_STICK_VALUE;
-    if (targetStickY > MAX_STICK_VALUE) targetStickY = MAX_STICK_VALUE;
-    if (targetStickY < -MAX_STICK_VALUE) targetStickY = -MAX_STICK_VALUE;
-
-    float consumedX = targetStickX / STICK_SCALE_FACTOR;
-    float consumedY = targetStickY / STICK_SCALE_FACTOR;
-    globalCameraState.bufferX -= consumedX;
-    globalCameraState.bufferY -= consumedY;
-
-    globalCameraState.bufferX *= globalCameraState.config.decayFactor;
-    globalCameraState.bufferY *= globalCameraState.config.decayFactor;
-    if (fabsf(globalCameraState.bufferX) < 0.01f) globalCameraState.bufferX = 0.0f;
-    if (fabsf(globalCameraState.bufferY) < 0.01f) globalCameraState.bufferY = 0.0f;
-
-    globalCameraState.currentVelocityX = targetStickX;
-    globalCameraState.currentVelocityY = targetStickY;
-
-    *outRx = (int32_t)lroundf(targetStickX);
-    *outRy = (int32_t)lroundf(targetStickY);
-
     pthread_mutex_unlock(&cameraLock);
-    return true;
+    return false;
 }
 
 void cameraSetMouseCaptured(bool captured) {
     pthread_mutex_lock(&cameraLock);
     globalCameraState.mouseCaptured = captured;
-    if (!captured) {
-        globalCameraState.pendingDeltaX = 0.0f;
-        globalCameraState.pendingDeltaY = 0.0f;
-        globalCameraState.currentVelocityX = 0.0f;
-        globalCameraState.currentVelocityY = 0.0f;
-    }
     pthread_mutex_unlock(&cameraLock);
 }
 
@@ -421,12 +319,6 @@ bool cameraIsMouseCaptured(void) {
 void cameraToggleMouseCapture(void) {
     pthread_mutex_lock(&cameraLock);
     globalCameraState.mouseCaptured = !globalCameraState.mouseCaptured;
-    if (!globalCameraState.mouseCaptured) {
-        globalCameraState.pendingDeltaX = 0.0f;
-        globalCameraState.pendingDeltaY = 0.0f;
-        globalCameraState.currentVelocityX = 0.0f;
-        globalCameraState.currentVelocityY = 0.0f;
-    }
     pthread_mutex_unlock(&cameraLock);
 }
 
@@ -526,12 +418,6 @@ void cameraSetGameplayActive(bool active) {
     pthread_mutex_lock(&cameraLock);
     globalCameraState.isGameplayActive = active;
     if (!active) {
-        globalCameraState.pendingDeltaX = 0.0f;
-        globalCameraState.pendingDeltaY = 0.0f;
-        globalCameraState.bufferX = 0.0f;
-        globalCameraState.bufferY = 0.0f;
-        globalCameraState.currentVelocityX = 0.0f;
-        globalCameraState.currentVelocityY = 0.0f;
         globalCameraState.mouseCaptured = false;
         globalCameraState.isLockDragKeyDown = false;
         globalCameraState.hasInitialSync = false;
@@ -548,12 +434,6 @@ bool cameraIsGameplayActive(void) {
 
 void cameraNoteGamepadActivity(void) {
     pthread_mutex_lock(&cameraLock);
-    globalCameraState.pendingDeltaX = 0.0f;
-    globalCameraState.pendingDeltaY = 0.0f;
-    globalCameraState.bufferX = 0.0f;
-    globalCameraState.bufferY = 0.0f;
-    globalCameraState.currentVelocityX = 0.0f;
-    globalCameraState.currentVelocityY = 0.0f;
     globalCameraState.hasInitialSync = false;
     pthread_mutex_unlock(&cameraLock);
 }

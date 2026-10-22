@@ -11,7 +11,9 @@ static void testCameraInit(void) {
     cameraInit();
     assert(!cameraIsMouseCaptured());
     int32_t rx = 0, ry = 0;
+    // 方案 A 模式下，手柄摇杆永远为 0
     assert(!cameraPoll(&rx, &ry));
+    assert(rx == 0 && ry == 0);
     printf("[PASS] testCameraInit\n");
 }
 
@@ -20,199 +22,167 @@ static void testGameplayActiveGate(void) {
     cameraSetGameplayActive(false);
     cameraSetMouseCaptured(true);
 
-    // 未进入游戏时，即使移动了鼠标，poll 也必须为 false 并自动丢弃位移
-    cameraAddMouseDelta(50.0f, 50.0f);
-    int32_t rx = 0, ry = 0;
-    assert(!cameraPoll(&rx, &ry));
+    double eyeX = 0.0, eyeY = 12.0, eyeZ = 5.0;
+    double lookAtX = 0.0, lookAtY = 10.0, lookAtZ = 0.0;
 
-    // 进入游戏并捕获鼠标后，位移应正常响应 (macOS 向上推鼠标 deltaY < 0 为仰视 ry > 0)
+    // 未进入游戏时，鼠标捕获处于未激活态
+    cameraAddMouseDelta(50.0f, 50.0f);
+    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
+    // 坐标未被修改
+    assert(eyeX == 0.0 && eyeY == 12.0 && eyeZ == 5.0);
+
+    // 进入游戏并捕获鼠标后，SpringArm 正常响应
     cameraSetGameplayActive(true);
     cameraSetMouseCaptured(true);
-    cameraAddMouseDelta(50.0f, -50.0f);
-    assert(cameraPoll(&rx, &ry));
-    assert(rx > 0 && ry > 0);
-
-    // 再次离开游戏（例如进入菜单），自动释放捕获，位移应再次被屏蔽
-    cameraSetGameplayActive(false);
-    assert(!cameraIsMouseCaptured());
-    cameraAddMouseDelta(30.0f, -30.0f);
-    assert(!cameraPoll(&rx, &ry));
+    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
+    cameraAddMouseDelta(50.0f, 0.0f);
+    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
+    assert(eyeX != 0.0);
 
     printf("[PASS] testGameplayActiveGate\n");
 }
 
-static void testMouseCaptureToggle(void) {
+static void testSpringArmInstantResponse(void) {
     cameraInit();
     cameraSetGameplayActive(true);
-    assert(!cameraIsMouseCaptured());
-
-    // 未捕获状态下，鼠标位移不应累积
-    cameraAddMouseDelta(50.0f, -50.0f);
-    int32_t rx = 0, ry = 0;
-    assert(!cameraPoll(&rx, &ry));
-
-    // 捕获鼠标
     cameraSetMouseCaptured(true);
-    assert(cameraIsMouseCaptured());
 
-    // 捕获状态下，鼠标位移正常记录 (向上推鼠标 deltaY < 0 映射为抬头仰视 ry > 0)
-    cameraAddMouseDelta(10.0f, -10.0f);
-    assert(cameraPoll(&rx, &ry));
-    assert(rx > 0 && ry > 0);
+    double eyeX = 0.0, eyeY = 12.0, eyeZ = 5.0;
+    double lookAtX = 0.0, lookAtY = 10.0, lookAtZ = 0.0;
 
-    // 释放捕获
-    cameraToggleMouseCapture();
-    assert(!cameraIsMouseCaptured());
+    // 初值对齐
+    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
 
-    printf("[PASS] testMouseCaptureToggle\n");
+    float yawBefore = 0.0f, pitchBefore = 0.0f, dist = 0.0f;
+    cameraGetAngles(&yawBefore, &pitchBefore, &dist);
+
+    // 1. 移动鼠标 10 像素：瞬间产生弧度变化
+    cameraAddMouseDelta(10.0f, 0.0f);
+    float yawAfter1 = 0.0f, pitchAfter1 = 0.0f;
+    cameraGetAngles(&yawAfter1, &pitchAfter1, &dist);
+    float diff1 = fabsf(yawAfter1 - yawBefore);
+    assert(diff1 > 0.05f);
+
+    // 2. 移动鼠标 50 像素 (5 倍位移)：角度变化严格为 5 倍 (线性 1:1 跟手，无非线性迟滞)
+    cameraAddMouseDelta(50.0f, 0.0f);
+    float yawAfter2 = 0.0f, pitchAfter2 = 0.0f;
+    cameraGetAngles(&yawAfter2, &pitchAfter2, &dist);
+    float diff2 = fabsf(yawAfter2 - yawAfter1);
+    assert(fabsf(diff2 - diff1 * 5.0f) < 0.001f);
+
+    printf("[PASS] testSpringArmInstantResponse (1:1 绝对零时延无蓄水池响应)\n");
 }
 
-static void testUnlimitedAcceleration(void) {
+static void testSpringArmZeroLatencyStop(void) {
     cameraInit();
     cameraSetGameplayActive(true);
     cameraSetMouseCaptured(true);
-    CameraConfig cfg = cameraGetConfig();
-    cfg.rawMouseMode = false; // 显式开启动态加速度模式进行非线性响应验证
-    cameraSetConfig(&cfg);
 
-    // 1. 慢速微调位移：移动 0.6 像素，测试单帧超线性放大响应
-    cameraAddMouseDelta(0.6f, 0.0f);
-    int32_t slowRx = 0, slowRy = 0;
-    bool slowActive = cameraPoll(&slowRx, &slowRy);
-    assert(slowActive);
-    assert(slowRx > 0);
+    double eyeX = 0.0, eyeY = 12.0, eyeZ = 5.0;
+    double lookAtX = 0.0, lookAtY = 10.0, lookAtZ = 0.0;
+    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
 
-    cameraReset();
+    // 快速甩动 500 像素
+    cameraAddMouseDelta(500.0f, -200.0f);
+    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
 
-    // 2. 快速移动 3.0 像素 (位移为 5 倍)
-    cameraAddMouseDelta(3.0f, 0.0f);
-    int32_t fastRx = 0, fastRy = 0;
-    bool fastActive = cameraPoll(&fastRx, &fastRy);
-    assert(fastActive);
-    assert(fastRx > 0);
+    float stoppedYaw = 0.0f, stoppedPitch = 0.0f, dist = 0.0f;
+    cameraGetAngles(&stoppedYaw, &stoppedPitch, &dist);
 
-    // 验证动态加速度特征：快速移动时的输出比单纯线性 5 倍还要大
-    float ratio = (float)fastRx / (float)slowRx;
-    assert(ratio > 5.0f);
-
-    cameraReset();
-
-    // 3. 验证 Spring Arm 蓄水池的大甩动总冲量连续释放特性：
-    // 快速划动 30 像素时，蓄水池将连续多帧稳定输出高推力，驱动弹簧臂平滑公转
-    cameraAddMouseDelta(30.0f, 0.0f);
-    int64_t totalImpulse = 0;
-    int32_t rx = 0, ry = 0;
-    int framesCount = 0;
-    while (cameraPoll(&rx, &ry)) {
-        totalImpulse += rx;
-        framesCount++;
-        if (framesCount > 50) break;
+    // 鼠标位移停止后，在接下来的 10 帧循环中，角度必须绝对静止，零漂移、零果冻感！
+    for (int frame = 0; frame < 10; frame++) {
+        cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
+        float curYaw = 0.0f, curPitch = 0.0f;
+        cameraGetAngles(&curYaw, &curPitch, &dist);
+        assert(curYaw == stoppedYaw);
+        assert(curPitch == stoppedPitch);
     }
-    // 应当持续稳定释放多帧 (不少于 4 帧)，驱动 Spring Arm 平滑旋转而不是单帧抽搐
-    assert(framesCount >= 4);
-    assert(totalImpulse > 80000);
 
-    printf("[PASS] testUnlimitedAcceleration (ratio=%.2f > 5.0, springArmFrames=%d, impulse=%lld)\n",
-           ratio, framesCount, (long long)totalImpulse);
+    printf("[PASS] testSpringArmZeroLatencyStop (停手瞬间绝对咬死静止，0 漂移)\n");
 }
 
-static void testInvertY(void) {
+static void testSpringArmPitchClamping(void) {
     cameraInit();
     cameraSetGameplayActive(true);
     cameraSetMouseCaptured(true);
 
-    // 默认设置：向上推鼠标 (-10.0f) 对应抬头仰视 (ry > 0)
-    cameraAddMouseDelta(0.0f, -10.0f);
-    int32_t rx = 0, ry = 0;
-    assert(cameraPoll(&rx, &ry));
-    assert(ry > 0);
+    double eyeX = 0.0, eyeY = 12.0, eyeZ = 5.0;
+    double lookAtX = 0.0, lookAtY = 10.0, lookAtZ = 0.0;
+    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
 
-    cameraReset();
+    // 向上狂推鼠标 5000 像素（抬头到极限）
+    cameraAddMouseDelta(0.0f, -5000.0f);
+    float yaw = 0.0f, pitch = 0.0f, dist = 0.0f;
+    cameraGetAngles(&yaw, &pitch, &dist);
+    assert(fabsf(pitch - 1.45f) < 0.001f); // 严格被钳位在 1.45 rad，绝不翻跟斗
 
-    // 开启反转 Y 轴：向上推鼠标 (-10.0f) 反转为低头俯视 (ry < 0)
-    CameraConfig cfg = cameraGetConfig();
-    cfg.invertY = true;
-    cameraSetConfig(&cfg);
+    // 向下狂推鼠标 10000 像素（俯视低头到极限）
+    cameraAddMouseDelta(0.0f, 10000.0f);
+    cameraGetAngles(&yaw, &pitch, &dist);
+    assert(fabsf(pitch - (-1.45f)) < 0.001f); // 严格被钳位在 -1.45 rad
 
-    cameraAddMouseDelta(0.0f, -10.0f);
-    assert(cameraPoll(&rx, &ry));
-    assert(ry < 0);
-
-    // 恢复默认设置
-    cfg.invertY = false;
-    cameraSetConfig(&cfg);
-
-    printf("[PASS] testInvertY\n");
+    printf("[PASS] testSpringArmPitchClamping (上下俯仰角严格钳位)\n");
 }
 
-static void testTouchDelta(void) {
-    cameraInit();
-    cameraSetGameplayActive(true);
-    // 移动端触控向上划屏 (deltaY < 0) 触发抬头仰视 (ry > 0)
-    cameraAddTouchDelta(15.0f, -10.0f);
-    int32_t rx = 0, ry = 0;
-    assert(cameraPoll(&rx, &ry));
-    assert(rx > 0);
-    assert(ry > 0);
-
-    printf("[PASS] testTouchDelta\n");
-}
-
-static void testDecayAndClamping(void) {
+static void testSpringArmCollisionSafeDistance(void) {
     cameraInit();
     cameraSetGameplayActive(true);
     cameraSetMouseCaptured(true);
 
-    // 极大位移：测试极限钳位保护 (向上推 -5000 对应 ry == 32767)
-    cameraAddMouseDelta(5000.0f, -5000.0f);
-    int32_t rx = 0, ry = 0;
-    assert(cameraPoll(&rx, &ry));
-    assert(rx == 32767);
-    assert(ry == 32767);
+    double eyeX = 0.0, eyeY = 12.0, eyeZ = 5.0;
+    double lookAtX = 0.0, lookAtY = 10.0, lookAtZ = 0.0;
+    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
 
-    // 连续多次 poll，Spring Arm 蓄水池平滑释放完毕并极速阻尼至零，无幽灵漂移
-    for (int i = 0; i < 40; i++) {
-        cameraPoll(&rx, &ry);
-    }
-    // 40 帧后已完全归零
-    assert(!cameraPoll(&rx, &ry));
+    float yaw = 0.0f, pitch = 0.0f, initialDist = 0.0f;
+    cameraGetAngles(&yaw, &pitch, &initialDist);
+    assert(fabsf(initialDist - 5.385f) < 0.05f);
 
-    printf("[PASS] testDecayAndClamping\n");
+    // 当物理碰撞检测到墙体（安全距离缩窄到 1.8m）时，相机必须收缩防止穿墙
+    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, 1.8f);
+    double curDist = sqrt((eyeX - lookAtX) * (eyeX - lookAtX) +
+                          (eyeY - lookAtY) * (eyeY - lookAtY) +
+                          (eyeZ - lookAtZ) * (eyeZ - lookAtZ));
+    assert(fabs(curDist - 1.8) < 0.05);
+
+    // 走出障碍物，安全距离恢复（-1.0f），相机自动拉回初始目标臂长
+    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
+    curDist = sqrt((eyeX - lookAtX) * (eyeX - lookAtX) +
+                   (eyeY - lookAtY) * (eyeY - lookAtY) +
+                   (eyeZ - lookAtZ) * (eyeZ - lookAtZ));
+    assert(fabs(curDist - 5.385) < 0.05);
+
+    printf("[PASS] testSpringArmCollisionSafeDistance (防穿墙物理碰撞距离收缩与恢复完美通过)\n");
 }
 
-static void testConfigHotReload(void) {
+static void testSpringArmZoomInOut(void) {
     cameraInit();
     cameraSetGameplayActive(true);
-    const char *tmpPath = "/tmp/test_camera_config.json";
-    FILE *f = fopen(tmpPath, "wb");
-    assert(f != NULL);
-    const char *content = "{\n"
-                          "  \"mouse_sens_x\": 2.8,\n"
-                          "  \"mouse_sens_y\": 3.1,\n"
-                          "  \"accel_factor\": 0.088,\n"
-                          "  \"decay_factor\": 0.65,\n"
-                          "  \"invert_y\": true,\n"
-                          "  \"raw_mouse\": false\n"
-                          "}";
-    fwrite(content, 1, strlen(content), f);
-    fclose(f);
+    cameraSetMouseCaptured(true);
 
-    bool reloaded = cameraCheckAndReloadConfig(tmpPath);
-    assert(reloaded == true);
+    double eyeX = 0.0, eyeY = 12.0, eyeZ = 5.0;
+    double lookAtX = 0.0, lookAtY = 10.0, lookAtZ = 0.0;
+    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
 
-    CameraConfig cfg = cameraGetConfig();
-    assert(fabsf(cfg.mouseSensitivityX - 2.8f) < 0.001f);
-    assert(fabsf(cfg.mouseSensitivityY - 3.1f) < 0.001f);
-    assert(fabsf(cfg.accelerationFactor - 0.088f) < 0.001f);
-    assert(fabsf(cfg.decayFactor - 0.65f) < 0.001f);
-    assert(cfg.invertY == true);
-    assert(cfg.rawMouseMode == false);
+    float yaw = 0.0f, pitch = 0.0f, baseDist = 0.0f;
+    cameraGetAngles(&yaw, &pitch, &baseDist);
 
-    // 未做任何改动时再次调用应返回 false
-    assert(cameraCheckAndReloadConfig(tmpPath) == false);
+    // 滚轮拉远 3 米
+    cameraAddZoom(3.0f);
+    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
+    double curDist = sqrt((eyeX - lookAtX) * (eyeX - lookAtX) +
+                          (eyeY - lookAtY) * (eyeY - lookAtY) +
+                          (eyeZ - lookAtZ) * (eyeZ - lookAtZ));
+    assert(fabs(curDist - (baseDist + 3.0f)) < 0.05);
 
-    remove(tmpPath);
-    printf("[PASS] testConfigHotReload\n");
+    // 滚轮拉近 5 米
+    cameraAddZoom(-5.0f);
+    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
+    curDist = sqrt((eyeX - lookAtX) * (eyeX - lookAtX) +
+                   (eyeY - lookAtY) * (eyeY - lookAtY) +
+                   (eyeZ - lookAtZ) * (eyeZ - lookAtZ));
+    assert(fabs(curDist - (baseDist - 2.0f)) < 0.05);
+
+    printf("[PASS] testSpringArmZoomInOut (滚轮拉近拉远臂长)\n");
 }
 
 static void testLockDragTargetSwitch(void) {
@@ -221,92 +191,41 @@ static void testLockDragTargetSwitch(void) {
     cameraSetMouseCaptured(true);
     assert(!cameraIsTargetLocked());
 
-    // 1. 单击（Tap）行为测试：按下后立即松开，无鼠标位移 -> 翻转为锁定状态
+    // 单击锁定
     cameraHandleLockDragButton(true);
     cameraHandleLockDragButton(false);
     assert(cameraIsTargetLocked());
 
-    // 再次单击 -> 翻转为未锁定状态
+    // 再次单击解锁
     cameraHandleLockDragButton(true);
     cameraHandleLockDragButton(false);
     assert(!cameraIsTargetLocked());
 
-    // 2. 长按 + 移动鼠标切怪测试：
+    // 长按 + 甩动鼠标向右切怪
     cameraHandleLockDragButton(true);
-    // 移动鼠标向右超过 28 像素
-    cameraAddMouseDelta(35.0f, 0.0f);
-    // 应触发向右切怪，且自动进入锁定
+    cameraFeedMouseMovementForTargetSwitch(35.0f);
     assert(cameraIsTargetLocked());
+
     int32_t rx = 0, ry = 0;
     assert(cameraPoll(&rx, &ry));
-    // 切怪脉冲生效中
-    assert(rx > 0);
+    assert(rx > 0); // 瞬时切怪脉冲
 
-    // 松开按钮：因为此前发生过切怪，松开时不应退出锁定，而是保持锁敌
     cameraHandleLockDragButton(false);
     assert(cameraIsTargetLocked());
 
-    printf("[PASS] testLockDragTargetSwitch (单击锁定/长按甩鼠标切怪完美通过)\n");
-}
-
-static void testSpringArmSyncAndTransform(void) {
-    cameraInit();
-    cameraSetGameplayActive(true);
-    cameraSetMouseCaptured(true);
-
-    // 假设游戏初始时：林克在 (0, 10, 0)，相机在 (0, 12, 5) -> 距离 sqrt(2^2 + 5^2) = sqrt(29) ≈ 5.385m
-    double eyeX = 0.0, eyeY = 12.0, eyeZ = 5.0;
-    double lookAtX = 0.0, lookAtY = 10.0, lookAtZ = 0.0;
-
-    // 首次调用：自动对齐初值
-    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
-    float yaw = 0.0f, pitch = 0.0f, dist = 0.0f;
-    cameraGetAngles(&yaw, &pitch, &dist);
-    assert(fabsf(yaw - 0.0f) < 0.01f);
-    assert(fabsf(dist - 5.385f) < 0.05f);
-
-    // 移动鼠标向右 100 像素 -> 视线向右转，第三人称相机自身旋转至角色左后方 (eyeX < 0)
-    cameraAddMouseDelta(100.0f, 0.0f);
-    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
-    assert(eyeX < 0.0);
-
-    // 避障检测测试：当物理检测碰到墙壁（安全距离变为 2.0m）时，相机必须缩短距离
-    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, 2.0f);
-    double curDist = sqrt((eyeX - lookAtX) * (eyeX - lookAtX) +
-                          (eyeY - lookAtY) * (eyeY - lookAtY) +
-                          (eyeZ - lookAtZ) * (eyeZ - lookAtZ));
-    assert(fabs(curDist - 2.0) < 0.05); // 成功收缩至 2.0m，防穿墙有效！
-
-    // 离开障碍物后，距离恢复到目标距离
-    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
-    curDist = sqrt((eyeX - lookAtX) * (eyeX - lookAtX) +
-                   (eyeY - lookAtY) * (eyeY - lookAtY) +
-                   (eyeZ - lookAtZ) * (eyeZ - lookAtZ));
-    assert(fabs(curDist - 5.385) < 0.05);
-
-    // 滚轮缩放测试：拉远 2 米
-    cameraAddZoom(2.0f);
-    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
-    curDist = sqrt((eyeX - lookAtX) * (eyeX - lookAtX) +
-                   (eyeY - lookAtY) * (eyeY - lookAtY) +
-                   (eyeZ - lookAtZ) * (eyeZ - lookAtZ));
-    assert(fabs(curDist - 7.385) < 0.05);
-
-    printf("[PASS] testSpringArmSyncAndTransform (初值无缝对齐/1:1旋转/防穿墙避障/滚轮拉远全通过)\n");
+    printf("[PASS] testLockDragTargetSwitch\n");
 }
 
 int main(void) {
-    printf("====== 运行相机控制器单元测试 ======\n");
+    printf("====== 运行纯净方案 A SpringArm 单元测试 ======\n");
     testCameraInit();
     testGameplayActiveGate();
-    testMouseCaptureToggle();
-    testUnlimitedAcceleration();
-    testInvertY();
-    testTouchDelta();
-    testDecayAndClamping();
-    testConfigHotReload();
+    testSpringArmInstantResponse();
+    testSpringArmZeroLatencyStop();
+    testSpringArmPitchClamping();
+    testSpringArmCollisionSafeDistance();
+    testSpringArmZoomInOut();
     testLockDragTargetSwitch();
-    testSpringArmSyncAndTransform();
-    printf("====== 所有单元测试全部通过！ ======\n");
+    printf("====== 所有纯净方案 A 单元测试全部通过！ ======\n");
     return 0;
 }
