@@ -355,8 +355,28 @@ void front_run(void (*guest)(void)) {
                 }
 
                 // -------------------------------------------------------------
-                // 2. 鼠标与触控事件流：执行精准命中测试与相机视角控制
+                // 2. 鼠标与触控事件流：执行精准相对位移拦截与视角控制
                 // -------------------------------------------------------------
+
+                // 当光标被捕获锁定时，相对位移 (deltaX, deltaY) 完全独立于光标绝对位置。
+                // 必须在任何绝对矩形命中测试之前优先消费，避免大角度甩动或光标落在标题栏/HUD上被误丢弃。
+                BOOL relativeMotion = (event.type == NSEventTypeMouseMoved ||
+                                       event.type == NSEventTypeLeftMouseDragged ||
+                                       event.type == NSEventTypeRightMouseDragged ||
+                                       event.type == NSEventTypeOtherMouseDragged);
+                if (relativeMotion && cameraIsMouseCaptured()) {
+                    cameraAddMouseDelta((float)event.deltaX, (float)event.deltaY);
+                    return nil;
+                }
+
+                // 释放注入的鼠标按键
+                if (event.type == NSEventTypeLeftMouseUp || event.type == NSEventTypeRightMouseUp) {
+                    inputTouchButton(event.type == NSEventTypeLeftMouseUp ? (1u << 3) : (1u << 9), false);
+                    if (cameraIsMouseCaptured()) return nil;
+                }
+                if (event.type == NSEventTypeOtherMouseUp) {
+                    cameraHandleLockDragButton(false);
+                }
 
                 // 鼠标左键点击时确保窗口成为 Key Window，获得输入焦点
                 if (event.type == NSEventTypeLeftMouseDown && !window.isKeyWindow) {
@@ -387,7 +407,6 @@ void front_run(void (*guest)(void)) {
                 }
 
                 // 游戏世界生命周期门禁：只有真正载入存档进入 3D 世界游玩时才允许捕获视角！
-                // 在首页、选择存档、读条加载和系统设置中，光标保持完全自由，不锁死视角
                 if (!cameraIsGameplayActive()) {
                     if (cameraIsMouseCaptured()) {
                         cameraSetMouseCaptured(false);
@@ -402,15 +421,16 @@ void front_run(void (*guest)(void)) {
                     cameraHandleLockDragButton(true);
                     return nil;
                 }
-                if (event.type == NSEventTypeOtherMouseUp) {
-                    cameraHandleLockDragButton(false);
-                    return nil;
-                }
 
-                // 滚轮上下滑动切换注视目标
+                // 滚轮控制：目标锁定时切换怪物；常规游玩时平滑缩放 SpringArm 弹簧臂距离 (Zoom In / Out)
                 if (event.type == NSEventTypeScrollWheel) {
-                    if (fabs(event.scrollingDeltaY) > 2.0) {
-                        cameraSwitchTarget(event.scrollingDeltaY > 0 ? 1 : -1);
+                    if (cameraIsTargetLocked()) {
+                        if (fabs(event.scrollingDeltaY) > 2.0) {
+                            cameraSwitchTarget(event.scrollingDeltaY > 0 ? 1 : -1);
+                        }
+                    } else if (cameraIsMouseCaptured()) {
+                        float zoomDelta = (float)(-event.scrollingDeltaY * 0.08f);
+                        cameraAddZoom(zoomDelta);
                     }
                     return nil;
                 }
@@ -451,14 +471,6 @@ void front_run(void (*guest)(void)) {
                     }
                 }
 
-                // 捕获模式下拦截鼠标位移，注入无限加速度相机控制器
-                if (event.type == NSEventTypeMouseMoved || event.type == NSEventTypeLeftMouseDragged || event.type == NSEventTypeRightMouseDragged) {
-                    if (cameraIsMouseCaptured()) {
-                        cameraAddMouseDelta((float)event.deltaX, (float)event.deltaY);
-                        return nil;
-                    }
-                    return event;
-                }
 
                 return event;
             }];

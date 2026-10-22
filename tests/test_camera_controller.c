@@ -71,6 +71,9 @@ static void testUnlimitedAcceleration(void) {
     cameraInit();
     cameraSetGameplayActive(true);
     cameraSetMouseCaptured(true);
+    CameraConfig cfg = cameraGetConfig();
+    cfg.rawMouseMode = false; // 显式开启动态加速度模式进行非线性响应验证
+    cameraSetConfig(&cfg);
 
     // 1. 慢速微调位移：移动 0.6 像素，测试单帧超线性放大响应
     cameraAddMouseDelta(0.6f, 0.0f);
@@ -168,10 +171,10 @@ static void testDecayAndClamping(void) {
     assert(ry == 32767);
 
     // 连续多次 poll，Spring Arm 蓄水池平滑释放完毕并极速阻尼至零，无幽灵漂移
-    for (int i = 0; i < 20; i++) {
+    for (int i = 0; i < 40; i++) {
         cameraPoll(&rx, &ry);
     }
-    // 20 帧后已完全归零
+    // 40 帧后已完全归零
     assert(!cameraPoll(&rx, &ry));
 
     printf("[PASS] testDecayAndClamping\n");
@@ -246,6 +249,52 @@ static void testLockDragTargetSwitch(void) {
     printf("[PASS] testLockDragTargetSwitch (单击锁定/长按甩鼠标切怪完美通过)\n");
 }
 
+static void testSpringArmSyncAndTransform(void) {
+    cameraInit();
+    cameraSetGameplayActive(true);
+    cameraSetMouseCaptured(true);
+
+    // 假设游戏初始时：林克在 (0, 10, 0)，相机在 (0, 12, 5) -> 距离 sqrt(2^2 + 5^2) = sqrt(29) ≈ 5.385m
+    double eyeX = 0.0, eyeY = 12.0, eyeZ = 5.0;
+    double lookAtX = 0.0, lookAtY = 10.0, lookAtZ = 0.0;
+
+    // 首次调用：自动对齐初值
+    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
+    float yaw = 0.0f, pitch = 0.0f, dist = 0.0f;
+    cameraGetAngles(&yaw, &pitch, &dist);
+    assert(fabsf(yaw - 0.0f) < 0.01f);
+    assert(fabsf(dist - 5.385f) < 0.05f);
+
+    // 移动鼠标向右 100 像素 -> 视线向右转，第三人称相机自身旋转至角色左后方 (eyeX < 0)
+    cameraAddMouseDelta(100.0f, 0.0f);
+    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
+    assert(eyeX < 0.0);
+
+    // 避障检测测试：当物理检测碰到墙壁（安全距离变为 2.0m）时，相机必须缩短距离
+    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, 2.0f);
+    double curDist = sqrt((eyeX - lookAtX) * (eyeX - lookAtX) +
+                          (eyeY - lookAtY) * (eyeY - lookAtY) +
+                          (eyeZ - lookAtZ) * (eyeZ - lookAtZ));
+    assert(fabs(curDist - 2.0) < 0.05); // 成功收缩至 2.0m，防穿墙有效！
+
+    // 离开障碍物后，距离恢复到目标距离
+    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
+    curDist = sqrt((eyeX - lookAtX) * (eyeX - lookAtX) +
+                   (eyeY - lookAtY) * (eyeY - lookAtY) +
+                   (eyeZ - lookAtZ) * (eyeZ - lookAtZ));
+    assert(fabs(curDist - 5.385) < 0.05);
+
+    // 滚轮缩放测试：拉远 2 米
+    cameraAddZoom(2.0f);
+    cameraUpdateSpringArm(&eyeX, &eyeY, &eyeZ, lookAtX, lookAtY, lookAtZ, -1.0f);
+    curDist = sqrt((eyeX - lookAtX) * (eyeX - lookAtX) +
+                   (eyeY - lookAtY) * (eyeY - lookAtY) +
+                   (eyeZ - lookAtZ) * (eyeZ - lookAtZ));
+    assert(fabs(curDist - 7.385) < 0.05);
+
+    printf("[PASS] testSpringArmSyncAndTransform (初值无缝对齐/1:1旋转/防穿墙避障/滚轮拉远全通过)\n");
+}
+
 int main(void) {
     printf("====== 运行相机控制器单元测试 ======\n");
     testCameraInit();
@@ -257,6 +306,7 @@ int main(void) {
     testDecayAndClamping();
     testConfigHotReload();
     testLockDragTargetSwitch();
+    testSpringArmSyncAndTransform();
     printf("====== 所有单元测试全部通过！ ======\n");
     return 0;
 }
