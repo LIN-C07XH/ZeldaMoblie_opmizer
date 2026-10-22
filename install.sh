@@ -41,6 +41,7 @@ cp "$SCRIPT_DIR/host/input.h" "$TARGET_DIR/host/"
 cp "$SCRIPT_DIR/host/input.c" "$TARGET_DIR/host/"
 cp "$SCRIPT_DIR/host/graphics.m" "$TARGET_DIR/host/"
 cp "$SCRIPT_DIR/ios/main.m" "$TARGET_DIR/ios/"
+[ -d "$TARGET_DIR/tests" ] && cp "$SCRIPT_DIR/tests/test_camera_controller.c" "$TARGET_DIR/tests/"
 
 echo "=================================================="
 echo "安装完成！"
