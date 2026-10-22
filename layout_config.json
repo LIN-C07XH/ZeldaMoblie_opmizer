@@ -1,0 +1,114 @@
+{
+  "comment": "TOTK 手游级动态按键布局配置 (Unity 锚点定位体系)",
+  "aspect_mode": "fill",
+  "buttons": [
+    {
+      "id": "attack_y",
+      "title": "⚔️ 普攻",
+      "anchor": "bottomRight",
+      "offset_x": -95.0,
+      "offset_y": -95.0,
+      "width": 72.0,
+      "height": 72.0,
+      "mapped_button": "Y",
+      "visible_event": "always",
+      "highlight_event": "combat"
+    },
+    {
+      "id": "dash_b",
+      "title": "💨 闪避",
+      "anchor": "bottomRight",
+      "offset_x": -185.0,
+      "offset_y": -50.0,
+      "width": 56.0,
+      "height": 56.0,
+      "mapped_button": "B",
+      "visible_event": "always",
+      "highlight_event": "always"
+    },
+    {
+      "id": "jump_x",
+      "title": "🦘 跳跃",
+      "anchor": "bottomRight",
+      "offset_x": -45.0,
+      "offset_y": -190.0,
+      "width": 52.0,
+      "height": 52.0,
+      "mapped_button": "X",
+      "visible_event": "always",
+      "highlight_event": "always"
+    },
+    {
+      "id": "interact_a",
+      "title": "✋ 拾取",
+      "anchor": "bottomRight",
+      "offset_x": -170.0,
+      "offset_y": -145.0,
+      "width": 50.0,
+      "height": 50.0,
+      "mapped_button": "A",
+      "visible_event": "always",
+      "highlight_event": "interact"
+    },
+    {
+      "id": "bow_zr",
+      "title": "🏹 射箭",
+      "anchor": "bottomRight",
+      "offset_x": -115.0,
+      "offset_y": -225.0,
+      "width": 48.0,
+      "height": 48.0,
+      "mapped_button": "ZR",
+      "visible_event": "always",
+      "highlight_event": "always"
+    },
+    {
+      "id": "target_lock_zl",
+      "title": "⌖ 锁敌",
+      "anchor": "bottomRight",
+      "offset_x": -245.0,
+      "offset_y": -120.0,
+      "width": 46.0,
+      "height": 46.0,
+      "mapped_button": "ZL",
+      "visible_event": "always",
+      "highlight_event": "combat"
+    },
+    {
+      "id": "switch_target",
+      "title": "⇄ 切怪",
+      "anchor": "bottomRight",
+      "offset_x": -245.0,
+      "offset_y": -175.0,
+      "width": 38.0,
+      "height": 38.0,
+      "mapped_button": "SWITCH",
+      "visible_event": "always",
+      "highlight_event": "always"
+    },
+    {
+      "id": "glider_x",
+      "title": "🪂 滑翔",
+      "anchor": "bottomRight",
+      "offset_x": -45.0,
+      "offset_y": -260.0,
+      "width": 58.0,
+      "height": 58.0,
+      "mapped_button": "X",
+      "visible_event": "in_air",
+      "highlight_event": "in_air"
+    },
+    {
+      "id": "skill_l",
+      "title": "🖐 究极",
+      "anchor": "bottomRight",
+      "offset_x": -180.0,
+      "offset_y": -225.0,
+      "width": 46.0,
+      "height": 46.0,
+      "mapped_button": "L",
+      "visible_event": "always",
+      "highlight_event": "ultrahand"
+    }
+  ]
+}
