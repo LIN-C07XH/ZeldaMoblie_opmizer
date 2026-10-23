@@ -83,6 +83,7 @@ tests/test_nvn_m3_predicate.m
 tests/test_nvn_m3_uniform.m
 tests/test_performance.c
 tests/test_run_session.py
+tests/test_touch_input.c
 tests/test_ui_fonts.py
 tests/test_vibration.c
 tools/camera_hook.py

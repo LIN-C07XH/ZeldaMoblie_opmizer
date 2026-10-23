@@ -24,6 +24,9 @@ void inputNoteDevice(InputDevice device);
 InputDevice inputGetDevice(void);
 void inputPointerButton(uint64_t buttonMask, bool pressed);
 void inputTouchStick(float x, float y);
+// Raw on-screen controller input stays a separate touch source.
+void inputTouchController(uint64_t buttons, float lx, float ly, float rx, float ry);
+void inputTouchControllerClear(void);
 void inputScrollEquipment(int direction);
 void inputCancelEquipmentScroll(void);
 /// Live native CtrlGuide/DoCommand state; zero outside active gameplay or after a stale UI frame.

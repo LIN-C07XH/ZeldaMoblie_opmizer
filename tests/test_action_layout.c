@@ -156,7 +156,31 @@ static void testLayoutValidation(void) {
     puts("[PASS] layout defaults, invalid-config retention and safe-area clamping");
 }
 
+static void testDefaultSpacing(void) {
+    const float sizes[][2]={{667,375},{812,375},{874,402},{1024,768}};
+    for (unsigned screen=0;screen<sizeof sizes/sizeof sizes[0];screen++) {
+        actionLayoutInit();
+        LayoutConfig cfg=actionGetLayoutConfig();
+        UiSafeAreaInsets safe={0,44,21,44};
+        actionDispatchEvents(EVENT_MASK_COMBAT|EVENT_MASK_INTERACT);
+        for (int i=0;i<cfg.buttonCount;i++) {
+            ComputedButtonRect a=actionComputeButtonRect(&cfg.buttons[i],sizes[screen][0],sizes[screen][1],&safe);
+            if (!a.isVisible) continue;
+            assert(a.width>=44 && a.height>=44);
+            assert(a.y>=safe.top+52); // Keep the menu toolbar clear.
+            for (int j=i+1;j<cfg.buttonCount;j++) {
+                ComputedButtonRect b=actionComputeButtonRect(&cfg.buttons[j],sizes[screen][0],sizes[screen][1],&safe);
+                if (!b.isVisible) continue;
+                assert(a.x+a.width<=b.x || b.x+b.width<=a.x || a.y+a.height<=b.y || b.y+b.height<=a.y);
+            }
+            // Default labels contain text rather than the former pictographs.
+            assert(!strstr(cfg.buttons[i].title,"\xF0\x9F"));
+        }
+    }
+}
+
 int main(void) {
+    testDefaultSpacing();
     printf("====== 运行屏幕适配与动态 Action 布局单元测试 ======\n");
     testScreenAspect();
     testActionLayoutDefault();

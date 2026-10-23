@@ -70,7 +70,7 @@
     "host/action_layout.inc": {
       "base": null,
       "overlay": {
-        "sha256": "1d4eb48537ff12dc58238d5e5eee726826726f27eb67cb4efa1f0be9e9cfc2f3",
+        "sha256": "2138384b0f3bd0d2f6d156a9e7539b39fadc4b85bd80d386582618ef19f0890e",
         "mode": 420
       }
     },
@@ -171,7 +171,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "937886c1392b9442e330c584fb503c42b13006e94c37efee5bace14d80ddecf4",
+        "sha256": "b8a8d3fc782db276226538b9e54886fc3ab9998ead1e9fb51c62d04ebcbc8e47",
         "mode": 420
       }
     },
@@ -181,7 +181,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "0def34487ee2b65121798ac31517b3c2439cb32227c897d23fa7858e9bcc2569",
+        "sha256": "0946bca275ffa3556b25155385fa1d5b15ee8419304bac39ff09d7fd2eceac8e",
         "mode": 420
       }
     },
@@ -520,7 +520,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "dd91e4632715d4d49ff783cd9a0189c9f4bc61cb9c03a409660fb7cf88be9d4f",
+        "sha256": "2d3a8939dcc138d70b1f9a037fb7119d0226f0f3d9ecf80f17fcb9396f5c74e9",
         "mode": 420
       }
     },
@@ -601,7 +601,7 @@
         "mode": 493
       },
       "overlay": {
-        "sha256": "9c77825ec08824b878d923385b41da6d7f395b286212e3a5c809b84e2269e461",
+        "sha256": "a9c1baaae690d5b2325096dbf1c1b1247931cef575913d7b08f46cf6b6bb95c5",
         "mode": 493
       }
     },
@@ -615,7 +615,7 @@
     "tests/test_action_layout.c": {
       "base": null,
       "overlay": {
-        "sha256": "0bcc0da239381b8f151e6bac43ab3694af10472bfb36b37bd028ff935588cf85",
+        "sha256": "f4f32b2a6780eb1b73db1bb18d5c65098f222f9bc87dffaa73be38dd9700b841",
         "mode": 420
       }
     },
@@ -754,6 +754,13 @@
       "base": null,
       "overlay": {
         "sha256": "eb5ddfefb29206119b10c790b272f79ff23e4bb3008ab09830dfd5a482f66e3a",
+        "mode": 420
+      }
+    },
+    "tests/test_touch_input.c": {
+      "base": null,
+      "overlay": {
+        "sha256": "53e7e9448f673e5756af65a990856df1772f4356530a0f12588693cd7d313ae7",
         "mode": 420
       }
     },

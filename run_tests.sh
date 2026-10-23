@@ -17,6 +17,10 @@ clang -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -I "$SCRIPT_DIR/
     "$SCRIPT_DIR/tests/test_native_ui.c" -o "$TEST_DIR/native_ui"
 "$TEST_DIR/native_ui"
 clang -Wall -Wextra -Werror -fsanitize=address,undefined \
+    -I "$SCRIPT_DIR/host" -I "$TARGET_DIR/host" -I "$TARGET_DIR/core/host" \
+    "$SCRIPT_DIR/tests/test_touch_input.c" "$SCRIPT_DIR/host/input.c" -o "$TEST_DIR/touch_input"
+"$TEST_DIR/touch_input"
+clang -Wall -Wextra -Werror -fsanitize=address,undefined \
     "$SCRIPT_DIR/tests/test_filesystem.c" "$SCRIPT_DIR/host/filesystem.c" -o "$TEST_DIR/filesystem"
 (cd "$TARGET_DIR" && "$TEST_DIR/filesystem")
 clang -Wall -Wextra -Werror -fsanitize=address,undefined -I "$TARGET_DIR/core/host" -I "$TARGET_DIR/host" -I "$TARGET_DIR/tests" \

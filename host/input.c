@@ -15,7 +15,8 @@ static pthread_mutex_t input_lock = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t sampling, latched_buttons;
 static uint64_t controller_buttons, controller_latched;
 static uint64_t touch_buttons;
-static int32_t controller_axes[4], touch_axes[2];
+static int32_t controller_axes[4], touch_axes[4];
+static uint64_t virtual_buttons, virtual_latched;
 static EquipmentWheel equipmentWheel;
 static _Atomic int lastInputDevice = INPUT_DEVICE_KEYBOARD_MOUSE;
 void inputNoteDevice(InputDevice device) { atomic_store_explicit(&lastInputDevice, device, memory_order_relaxed); }
@@ -80,7 +81,7 @@ void input_key(unsigned code, int pressed) {
 
 void input_clear(void) {
     pthread_mutex_lock(&input_lock); memset(keys, 0, sizeof keys); latched_buttons = 0;
-    controller_buttons = controller_latched = 0; touch_buttons = 0; memset(controller_axes, 0, sizeof controller_axes);
+    controller_buttons = controller_latched = 0; touch_buttons = virtual_buttons = virtual_latched = 0; memset(controller_axes, 0, sizeof controller_axes);
     memset(touch_axes, 0, sizeof touch_axes);
     equipmentWheelReset(&equipmentWheel);
     cameraReset();
@@ -118,6 +119,30 @@ void inputTouchStick(float x, float y) {
     pthread_mutex_unlock(&input_lock);
 }
 
+void inputTouchController(uint64_t buttons, float lx, float ly, float rx, float ry) {
+    float axes[4] = {lx, ly, rx, ry};
+    bool deliberate = (buttons & 0xffff) != 0;
+    for (unsigned i = 0; i < 4; i++) if (isfinite(axes[i]) && fabsf(axes[i]) > .20f) deliberate = true;
+    if (deliberate) { inputNoteDevice(INPUT_DEVICE_TOUCH); inputCancelEquipmentScroll(); }
+    pthread_mutex_lock(&input_lock);
+    buttons &= 0xffff;
+    virtual_latched |= buttons & ~virtual_buttons;
+    virtual_buttons = buttons;
+    for (unsigned i = 0; i < 2; i++) {
+        float x = axes[i * 2], y = axes[i * 2 + 1];
+        if (!isfinite(x) || !isfinite(y) || hypotf(x, y) < .12f) x = y = 0;
+        touch_axes[i * 2] = (int32_t)lroundf(fmaxf(-1, fminf(1, x)) * 32767);
+        touch_axes[i * 2 + 1] = (int32_t)lroundf(fmaxf(-1, fminf(1, y)) * 32767);
+    }
+    pthread_mutex_unlock(&input_lock);
+}
+void inputTouchControllerClear(void) {
+    pthread_mutex_lock(&input_lock);
+    virtual_buttons = virtual_latched = 0;
+    memset(touch_axes, 0, sizeof touch_axes);
+    pthread_mutex_unlock(&input_lock);
+}
+
 void input_controller(uint64_t buttons, float lx, float ly, float rx, float ry) {
     float axes[4] = {lx, ly, rx, ry};
     if (buttons != 0 || fabsf(lx) > 0.15f || fabsf(ly) > 0.15f || fabsf(rx) > 0.15f || fabsf(ry) > 0.15f) {
@@ -142,8 +167,8 @@ int input_states(ZeldaPadState *out, int count, uint32_t id, uint32_t style) {
     pthread_mutex_lock(&input_lock);
     *out = (ZeldaPadState){.sampling = ++sampling};
     if (id == 0 && player_enabled && (styles & style & 1)) {
-        out->buttons = latched_buttons | controller_buttons | controller_latched | touch_buttons;
-        latched_buttons = controller_latched = 0;
+        out->buttons = latched_buttons | controller_buttons | controller_latched | touch_buttons | virtual_buttons | virtual_latched;
+        latched_buttons = controller_latched = virtual_latched = 0;
         for (unsigned i = 0; i < sizeof mapping / sizeof *mapping; i++) if (keys[mapping[i].key]) out->buttons |= mapping[i].button;
         
         // 键盘基础摇杆映射
@@ -157,6 +182,8 @@ int input_states(ZeldaPadState *out, int count, uint32_t id, uint32_t style) {
         if (gamepadRightStickActive) {
             out->rx = controller_axes[2];
             out->ry = controller_axes[3];
+        } else if (touch_axes[2] || touch_axes[3]) {
+            out->rx = touch_axes[2]; out->ry = touch_axes[3];
         } else {
             // 实体手柄右摇杆静止时，接管鼠标视角动力学
             int32_t camRx = 0, camRy = 0;
