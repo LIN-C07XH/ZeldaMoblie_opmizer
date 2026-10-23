@@ -357,7 +357,20 @@ void front_run(void (*guest)(void)) {
                         return nil;
                     }
 
-                    // Option+ESC explicitly releases capture; plain ESC opens the menu.
+                    // The physical ` / ~ key toggles capture, with or without Shift.
+                    // Consume both edges and ignore repeats so one press toggles once.
+                    if (event.keyCode == 50) {
+                        if (event.type == NSEventTypeKeyDown && !event.isARepeat) {
+                            BOOL captured = !cameraIsMouseCaptured();
+                            cameraSetMouseCaptured(captured);
+                            inputCancelEquipmentScroll();
+                            CGAssociateMouseAndMouseCursorPosition(!captured);
+                            if (captured) [NSCursor hide]; else [NSCursor unhide];
+                        }
+                        return nil;
+                    }
+
+                    // Option+ESC remains a release shortcut; plain ESC opens the menu.
                     if (event.keyCode == 53 && (event.modifierFlags & NSEventModifierFlagOption) && cameraIsMouseCaptured()) {
                         if (event.type == NSEventTypeKeyDown) {
                             cameraSetMouseCaptured(false);
@@ -543,7 +556,7 @@ void front_run(void (*guest)(void)) {
             @"C / Ctrl : 潜行蹲下 (L3)\n"
             @"Tab / M  : 开启地图 (Minus)\n"
             @"1/2/3/4  : 武器/盾牌/材料/口哨\n"
-            @"ESC      : 暂停；Option+ESC 释放光标\n"
+            @"` / ~    : 捕获 / 释放鼠标；ESC 暂停\n"
             @"─────────────────────────────\n"
             @"左下角可呼出图形与性能设置";
         [g_keymap_hud addSubview:g_keymap_label];
@@ -560,7 +573,7 @@ void front_run(void (*guest)(void)) {
         __block InputDevice guideDevice = INPUT_DEVICE_KEYBOARD_MOUSE;
 
         // Native camera eligibility and OS pointer capture are independent.
-        // Only Option+ESC, focus loss, or closing the window releases capture.
+        // Only ` / ~, Option+ESC, focus loss, or closing releases capture.
         NSTimer *lifecycleTimer = [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer *timer) {
             (void)timer;
             cameraFrameSync();
