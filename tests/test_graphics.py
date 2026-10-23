@@ -13,6 +13,16 @@ from prepare_graphics import adapt_interface, adapt_glue, adapt_objects, adapt_b
 
 
 class GraphicsTests(unittest.TestCase):
+    def test_both_present_backends_follow_the_frontend_aspect_mode(self):
+        backend = adapt_backend((CORE / 'gfx/nvn/nvn_mtl.m').read_text())
+        self.assertEqual(backend.count('MTLViewport vp = zelda_present_viewport(dw, dh, cw, ch);'), 2)
+        # Source drift in either presenter must fail closed instead of leaving
+        # one backend with black bars after the frontend selects fill.
+        anchor = 'double dw = dst.width, dh = dst.height, s = fmin(dw / cw, dh / ch);'
+        drift = (CORE / 'gfx/nvn/nvn_mtl.m').read_text().replace(anchor, 'double changed_presenter;', 1)
+        with self.assertRaises(ValueError):
+            adapt_backend(drift)
+
     def test_frame_probe_is_idle_by_default_and_bounds_slow_phase_logs(self):
         source = r'''#include <stdint.h>
 #include <time.h>

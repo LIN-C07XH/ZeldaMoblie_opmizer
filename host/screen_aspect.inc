@@ -28,53 +28,5 @@ DeviceAspectClass screenClassifyAspect(float screenWidth, float screenHeight) {
 ScreenViewport screenCalculateViewport(float screenWidth, float screenHeight,
                                        float gameWidth, float gameHeight,
                                        ScreenAspectMode mode) {
-    ScreenViewport vp = {0.0f, 0.0f, screenWidth, screenHeight, 1.0f, 1.0f};
-    if (screenWidth <= 0.0f || screenHeight <= 0.0f || gameWidth <= 0.0f || gameHeight <= 0.0f) {
-        return vp;
-    }
-
-    float scaleX = screenWidth / gameWidth;
-    float scaleY = screenHeight / gameHeight;
-
-    switch (mode) {
-        case ASPECT_MODE_FILL: {
-            // 等比全屏充满：取较大缩放倍数，消除 iPad 4:3 上下黑边或 iPhone 19.5:9 左右黑边
-            float scale = fmaxf(scaleX, scaleY);
-            float scaledW = roundf(gameWidth * scale);
-            float scaledH = roundf(gameHeight * scale);
-            vp.originX = floorf((screenWidth - scaledW) * 0.5f);
-            vp.originY = floorf((screenHeight - scaledH) * 0.5f);
-            vp.width = scaledW;
-            vp.height = scaledH;
-            vp.scaleX = scale;
-            vp.scaleY = scale;
-            break;
-        }
-        case ASPECT_MODE_STRETCH: {
-            // 强制拉伸充满全屏
-            vp.originX = 0.0f;
-            vp.originY = 0.0f;
-            vp.width = screenWidth;
-            vp.height = screenHeight;
-            vp.scaleX = scaleX;
-            vp.scaleY = scaleY;
-            break;
-        }
-        case ASPECT_MODE_FIT:
-        default: {
-            // 传统等比居中适应：保留黑边
-            float scale = fminf(scaleX, scaleY);
-            float scaledW = roundf(gameWidth * scale);
-            float scaledH = roundf(gameHeight * scale);
-            vp.originX = floorf((screenWidth - scaledW) * 0.5f);
-            vp.originY = floorf((screenHeight - scaledH) * 0.5f);
-            vp.width = scaledW;
-            vp.height = scaledH;
-            vp.scaleX = scale;
-            vp.scaleY = scale;
-            break;
-        }
-    }
-
-    return vp;
+    return screenAspectViewport(screenWidth, screenHeight, gameWidth, gameHeight, mode);
 }

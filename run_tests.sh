@@ -10,6 +10,9 @@ clang -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -I "$SCRIPT_DIR/
 "$TEST_DIR/camera"
 clang -I "$SCRIPT_DIR/host" "$SCRIPT_DIR/tests/test_action_layout.c" -o "$TEST_DIR/layout"
 "$TEST_DIR/layout"
+clang -Wall -Wextra -Werror -fsanitize=address,undefined -I "$SCRIPT_DIR/host" \
+    "$SCRIPT_DIR/tests/test_screen_aspect.c" -o "$TEST_DIR/aspect"
+"$TEST_DIR/aspect"
 clang -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -I "$SCRIPT_DIR/host" \
     "$SCRIPT_DIR/tests/test_equipment_wheel.c" -o "$TEST_DIR/wheel"
 "$TEST_DIR/wheel"

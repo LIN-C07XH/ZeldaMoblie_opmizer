@@ -70,7 +70,7 @@
     "host/action_layout.inc": {
       "base": null,
       "overlay": {
-        "sha256": "2138384b0f3bd0d2f6d156a9e7539b39fadc4b85bd80d386582618ef19f0890e",
+        "sha256": "c5bb6d367f1d5a519a6d090d2b19819137059425465a48fdd1144317128c2649",
         "mode": 420
       }
     },
@@ -188,7 +188,7 @@
     "host/native_prompt_overlay.inc": {
       "base": null,
       "overlay": {
-        "sha256": "ce5ff90ed5d70f234fa51dd8e957ee304fa345b01d098b9dc2410b524dadf3fc",
+        "sha256": "16cd07b5a7bca6111cf6a56f2fc0f96ed1faea8079f8c929e7b63391ccc35678",
         "mode": 420
       }
     },
@@ -362,7 +362,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "e8cf99190b2b96d3a707e8508823ce3b201975549a35a4ebf945b81123bd7c34",
+        "sha256": "abbe0109ea05a78b86fa9d56af078602551b1049d1f05deaf50d76915e05b841",
         "mode": 420
       }
     },
@@ -459,14 +459,14 @@
     "host/screen_aspect.h": {
       "base": null,
       "overlay": {
-        "sha256": "2987658d8184316ae9afb8ea47d6eaefa7d8a3db275fe5cbf4b21bbb5c527c7c",
+        "sha256": "d2f095aabe3c8d66fd0ac224118802ade1b166ca1e5c57f366edb281c8c4b143",
         "mode": 420
       }
     },
     "host/screen_aspect.inc": {
       "base": null,
       "overlay": {
-        "sha256": "a7fc02b3c7ea4b8eae0312c9dd6f13f076750ae11aae32ba4ea7d8e211651e1d",
+        "sha256": "bfde7c2a47cc5d4f57ef83e9c57ec5e11eb5c25e7b1f4019956895d2739ed28d",
         "mode": 420
       }
     },
@@ -520,7 +520,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "2d3a8939dcc138d70b1f9a037fb7119d0226f0f3d9ecf80f17fcb9396f5c74e9",
+        "sha256": "103c717e60792f1f81a656d767f6152de8681cb7ceef579b25ce186f32985a1b",
         "mode": 420
       }
     },
@@ -567,7 +567,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "4eb9b7243ea0117b2f9f15812d1d894c3d47e9d3dc5b0cd17a9bef4f6000cace",
+        "sha256": "262a918f74044071f6de7636e96633609366194c9968f3f6b103ebb78495cbad",
         "mode": 420
       }
     },
@@ -601,7 +601,7 @@
         "mode": 493
       },
       "overlay": {
-        "sha256": "a9c1baaae690d5b2325096dbf1c1b1247931cef575913d7b08f46cf6b6bb95c5",
+        "sha256": "a8ff4bed9357937d42279202e93126f6984b2b2585a405320d0618c994230aba",
         "mode": 493
       }
     },
@@ -615,7 +615,7 @@
     "tests/test_action_layout.c": {
       "base": null,
       "overlay": {
-        "sha256": "f4f32b2a6780eb1b73db1bb18d5c65098f222f9bc87dffaa73be38dd9700b841",
+        "sha256": "b5a327f740553460f469fccd650323547750c1bcc6e1af01386c639c9ce9cb31",
         "mode": 420
       }
     },
@@ -673,7 +673,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "fdc28e569a6cdd21a6d38a730e72740ec07b82f41f5844d15ad33393ac717cb0",
+        "sha256": "db89f0fc2d9f865c3c0a75b307c5bf69704b338373591080ae6c31b7ba80d912",
         "mode": 420
       }
     },
@@ -722,7 +722,7 @@
     "tests/test_nvn_m3_metalfx.m": {
       "base": null,
       "overlay": {
-        "sha256": "10ca821f0a43af3484e86994150f2283514b489a1269c8aec93c8ab0074a1ebb",
+        "sha256": "1f0ee2df3c31f13e5db78be247d93aedec1839d3eec84047d260d02fecec7704",
         "mode": 420
       }
     },
@@ -754,6 +754,13 @@
       "base": null,
       "overlay": {
         "sha256": "eb5ddfefb29206119b10c790b272f79ff23e4bb3008ab09830dfd5a482f66e3a",
+        "mode": 420
+      }
+    },
+    "tests/test_screen_aspect.c": {
+      "base": null,
+      "overlay": {
+        "sha256": "bad0e03cae380acea89befbfb143b67199004e1e6bf48247ab324f6153fb290f",
         "mode": 420
       }
     },

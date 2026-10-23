@@ -912,6 +912,9 @@ static void dispatch(const p_dispatch *dp) {
         '''    if (zelda_warm_canonical(vs, fs)) pso_user_record("R\\t%s\\n", shex);
     else if (!g_pso_lmap && g_shcache[@(vs->key)] == vs && fs && fs->z_fetch_identity.length)
         pso_user_record("F\\t%s\\t%s\\n", shex, fs->z_fetch_identity.UTF8String);''',
+        # Identical fit-only viewports in the Metal 3 and Metal 4 presenters.
+        '    double dw = dst.width, dh = dst.height, s = fmin(dw / cw, dh / ch);\n    MTLViewport vp = {floor((dw - cw * s) / 2), floor((dh - ch * s) / 2), round(cw * s), round(ch * s), 0, 1};\n    if (fabs((dw / dh) / ((double)cw / ch) - 1) < 0.01) vp = (MTLViewport){0, 0, dw, dh, 0, 1};':
+        '    double dw = dst.width, dh = dst.height;\n    MTLViewport vp = zelda_present_viewport(dw, dh, cw, ch);',
         # Optional MetalFX spatial upscale before the present draw (nvn_present_scale.inc).
         'static int present_encode_m4(CBUF cb, id<MTLTexture> src, id<MTLTexture> dst, const int crop[4], int uv_i);':
         '#include "nvn_present_scale.inc"\nstatic int present_encode_m4(CBUF cb, id<MTLTexture> src, id<MTLTexture> dst, const int crop[4], int uv_i);',
@@ -1135,7 +1138,8 @@ static void bind_args(id<MTLCommandEncoder> en, int nvn_stage, int metal_vertex,
         '            | (t->d.flags & NVN_TEXTURE_FLAGS_IMAGE ? MTLTextureUsageShaderWrite : 0) | zelda_fsc_usage(d, fmt_compressed(t->d.format) || packaged)',
     }
     for original, replacement in replacements.items():
-        if source.count(original) != 1:
+        expected = 2 if original.startswith('    double dw = dst.width, dh = dst.height, s = fmin') else 1
+        if source.count(original) != expected:
             raise ValueError('NVN Metal shader implementation changed')
         source = source.replace(original, replacement)
     source, shader_builds = re.subn(

@@ -3,7 +3,7 @@
 Validated on 2026-10-23 against upstream totk-mobile commit
 `510d95b8da159c0a7da467ad51b10a5a7c7ac133`, with TotK v1.4.3 inputs.
 
-The source package contains 91 override files and fingerprints 548 unchanged
+The source package contains 92 override files and fingerprints 548 unchanged
 upstream build inputs. It includes the local Metal 3 commits and subsequent
 camera, UI, cloud-save, phone-haptics and iOS compatibility changes. No game
 resources, compiled application, credentials or saves are distributed.
@@ -20,7 +20,7 @@ ExeFS inputs were shared; generated modules and build outputs were independent.
 - The camera, layout, equipment wheel, native UI, filesystem, vibration,
   controller-haptics, phone routing and mock cloud-save native tests passed.
 - Font preparation (3), camera trampolines (2), native UI trampolines (4), iOS
-  configuration (4), session logging (3), and graphics regression tests (33) passed.
+  configuration (4), session logging (3), and graphics regression tests (34) passed.
 - Standalone Metal 3 index, predicate, dispatch batching, uniform and MetalFX
   tests passed with Metal validation enabled.
 - All three guest modules were regenerated from original ExeFS, then the Mac app
@@ -57,7 +57,7 @@ The native tests require Apple development tools and the target project's
 headers. Unicorn needs JIT permission; Metal tests need access to a GPU; mock
 provider tests need the system file coordination service.
 
-## iOS touch controls update
+## Initial iOS touch controls update (superseded interaction placement)
 
 The title-screen confirm action now has a persistent A-button path independent
 of native interaction prompts, camera state, input-device detection and custom
@@ -91,3 +91,37 @@ Xcode's missing SDK stat cache was bypassed for this validation with
 The unsigned check app is not a signed deployable build. No app was installed or
 launched. Physical device layout, simultaneous gestures and controller switching
 remain for user acceptance testing.
+
+## Mobile interaction layout and display update
+
+The attack button is now an 80-point primary action moved inward from the screen
+edge. Jump and sprint are on its right; secondary actions sit to its left. Real
+native interactions use an independent middle-right slot. Without a valid prompt,
+that slot is hidden and Confirm stays in the top toolbar, including on the title
+screen. Prompt expiration/change releases the old button. No UIKit impact
+feedback generator remains in the frontend; game vibration events retain their
+existing bridge.
+
+The exact geometry/mappings of the two shipped presets are migrated in memory;
+custom layouts and labels are retained and no user file is overwritten. Spacing
+checks include a 568x320 small landscape surface and highlighted buttons.
+
+The original renderer fitted a 16:9 image inside the full drawable, independently
+of safe areas. Both Metal presenters now use a shared viewport helper. iOS defaults
+to equal-scale fill/crop with a persistent Fit switch; Mac retains Fit. Host text
+prompts follow the same image transform. Rendering uses full window bounds while
+controls retain safe-area margins. Fit preserves the whole original image; Fill
+crops excess image and does not increase game FOV.
+
+The display geometry tests include the iPhone 17 Pro rectangular 2622x1206 size
+([Apple specifications](https://support.apple.com/en-gb/125090)), tablets and wider
+surfaces, point/pixel scaling, centering and invalid input. For a 1920x1080 image
+on that phone, Fit produces a 2144x1206 image at x=239; Fill produces 2622x1475 at
+y=-135. These are calculated viewport results, not measured device screenshots.
+
+The overlay test runner, all 34 graphics regression tests and the independent
+Metal 3 GPU tests passed with this update. The iOS 17 / Metal 3 frontend and the
+adapted NVN backend were both recompiled and linked in the unsigned app. The
+current Mac app compiled and completed load-only with three modules. Neither
+app was installed on a device or started into a game session for this update.
+Physical phone gesture, layout and screen-edge acceptance remain with the user.

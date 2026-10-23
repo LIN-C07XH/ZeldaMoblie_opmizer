@@ -1,11 +1,12 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#include <math.h>
 
 /// 屏幕画面宽高比适配模式
 typedef enum {
     ASPECT_MODE_FIT = 0,     // 等比适应（保留黑边，完整显示原画面）
-    ASPECT_MODE_FILL = 1,    // 等比全屏充满（无黑边，消除 iPad 4:3 和 iPhone 19.5:9 黑边）
+    ASPECT_MODE_FILL = 1,    // Equal-scale fill; excess image is cropped, not a wider game FOV.
     ASPECT_MODE_STRETCH = 2  // 拉伸充满
 } ScreenAspectMode;
 
@@ -35,3 +36,17 @@ DeviceAspectClass screenClassifyAspect(float screenWidth, float screenHeight);
 ScreenViewport screenCalculateViewport(float screenWidth, float screenHeight,
                                        float gameWidth, float gameHeight,
                                        ScreenAspectMode mode);
+
+// Shared by the Metal present encoder and frontend overlays. Display dimensions
+// refer to the whole drawable; safe areas belong to controls, never the image.
+static inline ScreenViewport screenAspectViewport(float sw, float sh, float gw, float gh, ScreenAspectMode mode) {
+    ScreenViewport vp = {0, 0, 0, 0, 1, 1};
+    if (!isfinite(sw) || !isfinite(sh) || !isfinite(gw) || !isfinite(gh) || sw<=0 || sh<=0 || gw<=0 || gh<=0) return vp;
+    float sx=sw/gw, sy=sh/gh;
+    if (mode==ASPECT_MODE_STRETCH) return (ScreenViewport){0,0,sw,sh,sx,sy};
+    float scale=mode==ASPECT_MODE_FILL ? fmaxf(sx,sy) : fminf(sx,sy);
+    vp.width=roundf(gw*scale); vp.height=roundf(gh*scale);
+    vp.originX=floorf((sw-vp.width)*.5f); vp.originY=floorf((sh-vp.height)*.5f);
+    vp.scaleX=vp.scaleY=scale;
+    return vp;
+}

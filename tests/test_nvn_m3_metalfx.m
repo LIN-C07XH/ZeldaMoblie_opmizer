@@ -16,6 +16,9 @@ static void res_commit(void) {}
 
 static void check(id<MTLCommandQueue> queue, int mode, NSUInteger width, NSUInteger height,
                   NSUInteger destination_width, NSUInteger destination_height) {
+    // Desktop presentation must not require the iOS frontend's mode getter.
+    MTLViewport fitted = zelda_present_viewport(2622, 1206, 1920, 1080);
+    assert(fitted.originX == 239 && fitted.originY == 0 && fitted.width == 2144 && fitted.height == 1206);
     MTLTextureDescriptor *d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
         width:width height:height mipmapped:NO];
     d.storageMode = MTLStorageModePrivate;

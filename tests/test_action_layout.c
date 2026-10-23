@@ -62,16 +62,16 @@ static void testActionLayoutDefault(void) {
 
     // 验证普攻键 Y 为大圆按键 (72x72)，锚定在右下角
     assert(btnAttack->anchor == ANCHOR_BOTTOM_RIGHT);
-    assert(btnAttack->width == 72.0f);
-    assert(btnAttack->height == 72.0f);
+    assert(btnAttack->width == 80.0f);
+    assert(btnAttack->height == 80.0f);
     assert(btnAttack->padButton == PAD_BTN_Y);
 
     // 屏幕尺寸模拟：iPhone 16 Pro (874 x 402 pt)
     UiSafeAreaInsets insets = {0.0f, 59.0f, 21.0f, 59.0f};
     ComputedButtonRect attackRect = actionComputeButtonRect(btnAttack, 874.0f, 402.0f, &insets);
     assert(attackRect.isVisible == true);
-    assert(attackRect.width == 72.0f);
-    assert(attackRect.height == 72.0f);
+    assert(attackRect.width == 80.0f);
+    assert(attackRect.height == 80.0f);
 
     // 常态下：滑翔伞按钮不显示 (不在空中)
     ComputedButtonRect gliderRectNormal = actionComputeButtonRect(btnGlider, 874.0f, 402.0f, &insets);
@@ -157,11 +157,12 @@ static void testLayoutValidation(void) {
 }
 
 static void testDefaultSpacing(void) {
-    const float sizes[][2]={{667,375},{812,375},{874,402},{1024,768}};
+    const float sizes[][2]={{568,320},{667,375},{812,375},{874,402},{1024,768}};
     for (unsigned screen=0;screen<sizeof sizes/sizeof sizes[0];screen++) {
         actionLayoutInit();
         LayoutConfig cfg=actionGetLayoutConfig();
         UiSafeAreaInsets safe={0,44,21,44};
+        if (screen==0) safe=(UiSafeAreaInsets){0,0,0,0};
         actionDispatchEvents(EVENT_MASK_COMBAT|EVENT_MASK_INTERACT);
         for (int i=0;i<cfg.buttonCount;i++) {
             ComputedButtonRect a=actionComputeButtonRect(&cfg.buttons[i],sizes[screen][0],sizes[screen][1],&safe);
@@ -179,8 +180,33 @@ static void testDefaultSpacing(void) {
     }
 }
 
+static void testLegacyGeometryMigration(void) {
+    actionLayoutInit();
+    LayoutConfig defaults=actionGetLayoutConfig(), legacy=defaults;
+    const float old[][4]={{-56,-58,72,72},{-144,-38,56,56},{-36,-148,52,52},{-158,-116,104,52},
+        {-104,-202,48,48},{-246,-64,48,48},{-246,-128,44,44},{-36,-216,56,56},{-178,-202,48,48}};
+    for (int i=0;i<9;i++) {
+        legacy.buttons[i].anchor=ANCHOR_BOTTOM_RIGHT;
+        legacy.buttons[i].offsetX=old[i][0]; legacy.buttons[i].offsetY=old[i][1];
+        legacy.buttons[i].width=old[i][2]; legacy.buttons[i].height=old[i][3];
+    }
+    LayoutConfig custom=legacy;
+    custom.buttons[0].offsetX-=1;
+    assert(!actionLayoutMigrateLegacy(&custom) && custom.buttons[0].offsetX==-57);
+    strcpy(legacy.buttons[0].title,"Custom");
+    assert(actionLayoutMigrateLegacy(&legacy));
+    assert(!strcmp(legacy.buttons[0].title,"Custom"));
+    for (int i=0;i<9;i++) {
+        assert(legacy.buttons[i].anchor==defaults.buttons[i].anchor);
+        assert(legacy.buttons[i].offsetX==defaults.buttons[i].offsetX && legacy.buttons[i].offsetY==defaults.buttons[i].offsetY);
+        assert(legacy.buttons[i].width==defaults.buttons[i].width && legacy.buttons[i].height==defaults.buttons[i].height);
+    }
+    assert(!actionLayoutMigrateLegacy(&defaults));
+}
+
 int main(void) {
     testDefaultSpacing();
+    testLegacyGeometryMigration();
     printf("====== 运行屏幕适配与动态 Action 布局单元测试 ======\n");
     testScreenAspect();
     testActionLayoutDefault();

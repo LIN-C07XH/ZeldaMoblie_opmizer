@@ -5,6 +5,23 @@
 // a queue barrier updates the fence the scaler waits on, so it reads the finished game frame; the present render
 // encoder already starts with a queue barrier. Without MetalFX, a cropped input or a smaller output, nothing changes.
 #import <MetalFX/MetalFX.h>
+#import <TargetConditionals.h>
+#include "screen_aspect.h"
+// iOS supplies the selected mode. Other frontends retain the original fit.
+#if TARGET_OS_IPHONE
+extern int front_screen_aspect_mode(void);
+#endif
+static MTLViewport zelda_present_viewport(double dw, double dh, double cw, double ch) {
+    int mode = ASPECT_MODE_FIT;
+#if TARGET_OS_IPHONE
+    mode = front_screen_aspect_mode();
+#endif
+    ScreenViewport rect = screenAspectViewport(dw, dh, cw, ch, (ScreenAspectMode)mode);
+    MTLViewport vp = {rect.originX, rect.originY, rect.width, rect.height, 0, 1};
+    if (mode == ASPECT_MODE_FIT && fabs((dw/dh)/(cw/ch)-1) < .01)
+        vp = (MTLViewport){0,0,dw,dh,0,1};
+    return vp;
+}
 static _Atomic int z_scale_mode;
 #if DM_NVN_M3
 static id<MTLFXSpatialScaler> z_scaler;

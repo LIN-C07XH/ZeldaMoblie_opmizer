@@ -6,7 +6,7 @@
 #include <math.h>
 
 static pthread_mutex_t layoutLock = PTHREAD_MUTEX_INITIALIZER;
-static LayoutConfig currentLayout;
+static LayoutConfig currentLayout, mobileDefaults;
 static uint32_t currentActiveEvents = EVENT_MASK_ALWAYS;
 
 static UiAnchor parseAnchorName(const char *name) {
@@ -67,10 +67,10 @@ void actionLayoutSetDefaultMobile(void) {
         .id = "attack_y",
         .title = "攻击",
         .anchor = ANCHOR_BOTTOM_RIGHT,
-        .offsetX = -56.0f,
-        .offsetY = -58.0f,
-        .width = 72.0f,
-        .height = 72.0f,
+        .offsetX = -126.0f,
+        .offsetY = -106.0f,
+        .width = 80.0f,
+        .height = 80.0f,
         .padButton = PAD_BTN_Y,
         .visibleEvents = EVENT_MASK_ALWAYS,
         .highlightEvents = EVENT_MASK_COMBAT,
@@ -82,10 +82,10 @@ void actionLayoutSetDefaultMobile(void) {
         .id = "dash_b",
         .title = "疾跑",
         .anchor = ANCHOR_BOTTOM_RIGHT,
-        .offsetX = -144.0f,
-        .offsetY = -38.0f,
-        .width = 56.0f,
-        .height = 56.0f,
+        .offsetX = -48.0f,
+        .offsetY = -62.0f,
+        .width = 52.0f,
+        .height = 52.0f,
         .padButton = PAD_BTN_B,
         .visibleEvents = EVENT_MASK_ALWAYS,
         .highlightEvents = EVENT_MASK_NONE,
@@ -97,10 +97,10 @@ void actionLayoutSetDefaultMobile(void) {
         .id = "jump_x",
         .title = "跳跃",
         .anchor = ANCHOR_BOTTOM_RIGHT,
-        .offsetX = -36.0f,
-        .offsetY = -148.0f,
-        .width = 52.0f,
-        .height = 52.0f,
+        .offsetX = -44.0f,
+        .offsetY = -132.0f,
+        .width = 56.0f,
+        .height = 56.0f,
         .padButton = PAD_BTN_X,
         .visibleEvents = EVENT_MASK_ALWAYS,
         .highlightEvents = EVENT_MASK_NONE,
@@ -111,10 +111,10 @@ void actionLayoutSetDefaultMobile(void) {
     LayoutButtonDef btnInteract = {
         .id = "interact_a",
         .title = "操作",
-        .anchor = ANCHOR_BOTTOM_RIGHT,
-        .offsetX = -158.0f,
-        .offsetY = -116.0f,
-        .width = 104.0f,
+        .anchor = ANCHOR_MIDDLE_RIGHT,
+        .offsetX = -104.0f,
+        .offsetY = -54.0f,
+        .width = 120.0f,
         .height = 52.0f,
         .padButton = PAD_BTN_A,
         .visibleEvents = EVENT_MASK_ALWAYS,
@@ -127,8 +127,8 @@ void actionLayoutSetDefaultMobile(void) {
         .id = "bow_zr",
         .title = "射箭",
         .anchor = ANCHOR_BOTTOM_RIGHT,
-        .offsetX = -104.0f,
-        .offsetY = -202.0f,
+        .offsetX = -202.0f,
+        .offsetY = -154.0f,
         .width = 48.0f,
         .height = 48.0f,
         .padButton = PAD_BTN_ZR,
@@ -142,8 +142,8 @@ void actionLayoutSetDefaultMobile(void) {
         .id = "target_lock_zl",
         .title = "锁定",
         .anchor = ANCHOR_BOTTOM_RIGHT,
-        .offsetX = -246.0f,
-        .offsetY = -64.0f,
+        .offsetX = -218.0f,
+        .offsetY = -72.0f,
         .width = 48.0f,
         .height = 48.0f,
         .padButton = PAD_BTN_ZL,
@@ -157,8 +157,8 @@ void actionLayoutSetDefaultMobile(void) {
         .id = "switch_target",
         .title = "切换",
         .anchor = ANCHOR_BOTTOM_RIGHT,
-        .offsetX = -246.0f,
-        .offsetY = -128.0f,
+        .offsetX = -280.0f,
+        .offsetY = -72.0f,
         .width = 44.0f,
         .height = 44.0f,
         .padButton = PAD_BTN_SPECIAL_SWITCH,
@@ -171,11 +171,11 @@ void actionLayoutSetDefaultMobile(void) {
     LayoutButtonDef btnGlider = {
         .id = "glider_x",
         .title = "滑翔",
-        .anchor = ANCHOR_BOTTOM_RIGHT,
-        .offsetX = -36.0f,
-        .offsetY = -216.0f,
-        .width = 56.0f,
-        .height = 56.0f,
+        .anchor = ANCHOR_MIDDLE_RIGHT,
+        .offsetX = -104.0f,
+        .offsetY = -54.0f,
+        .width = 120.0f,
+        .height = 52.0f,
         .padButton = PAD_BTN_X,
         .visibleEvents = EVENT_MASK_IN_AIR,
         .highlightEvents = EVENT_MASK_IN_AIR,
@@ -187,10 +187,10 @@ void actionLayoutSetDefaultMobile(void) {
         .id = "skill_l",
         .title = "能力",
         .anchor = ANCHOR_BOTTOM_RIGHT,
-        .offsetX = -178.0f,
-        .offsetY = -202.0f,
-        .width = 48.0f,
-        .height = 48.0f,
+        .offsetX = -268.0f,
+        .offsetY = -148.0f,
+        .width = 52.0f,
+        .height = 52.0f,
         .padButton = PAD_BTN_L,
         .visibleEvents = EVENT_MASK_ALWAYS,
         .highlightEvents = EVENT_MASK_ULTRAHAND,
@@ -207,6 +207,7 @@ void actionLayoutSetDefaultMobile(void) {
     currentLayout.buttons[7] = btnGlider;
     currentLayout.buttons[8] = btnSkill;
     currentLayout.buttonCount = 9;
+    mobileDefaults = currentLayout;
 
     pthread_mutex_unlock(&layoutLock);
 }
@@ -278,6 +279,42 @@ static const char *layoutDelimiter(const char *p, char delimiter) {
         else if (*p == delimiter) return p;
     }
     return NULL;
+}
+
+// Migrate only the exact geometry and mappings of our two shipped presets.
+// Real custom layouts and labels are retained; no configuration file is written.
+static bool actionLayoutMigrateLegacy(LayoutConfig *cfg) {
+    static const float old[2][9][4] = {
+        {{-95,-95,72,72},{-185,-50,56,56},{-45,-190,52,52},{-170,-145,104,54},
+         {-115,-225,48,48},{-245,-120,46,46},{-245,-175,38,38},{-45,-260,58,58},{-180,-225,46,46}},
+        {{-56,-58,72,72},{-144,-38,56,56},{-36,-148,52,52},{-158,-116,104,52},
+         {-104,-202,48,48},{-246,-64,48,48},{-246,-128,44,44},{-36,-216,56,56},{-178,-202,48,48}}
+    };
+    if (cfg->buttonCount != 9 || mobileDefaults.buttonCount != 9) return false;
+    int slots[9];
+    for (int version=0;version<2;version++) {
+        bool matched=true;
+        for (int i=0;i<9;i++) {
+            const LayoutButtonDef *def=&mobileDefaults.buttons[i];
+            slots[i]=-1;
+            for (int j=0;j<9;j++) if (!strcmp(cfg->buttons[j].id,def->id)) slots[i]=j;
+            if (slots[i]<0) { matched=false; break; }
+            const LayoutButtonDef *b=&cfg->buttons[slots[i]];
+            if (b->anchor!=ANCHOR_BOTTOM_RIGHT || b->padButton!=def->padButton ||
+                b->visibleEvents!=def->visibleEvents || b->highlightEvents!=def->highlightEvents ||
+                b->offsetX!=old[version][i][0] || b->offsetY!=old[version][i][1] ||
+                b->width!=old[version][i][2] || b->height!=old[version][i][3]) { matched=false; break; }
+        }
+        if (!matched) continue;
+        for (int i=0;i<9;i++) {
+            LayoutButtonDef *b=&cfg->buttons[slots[i]];
+            const LayoutButtonDef *def=&mobileDefaults.buttons[i];
+            b->anchor=def->anchor; b->offsetX=def->offsetX; b->offsetY=def->offsetY;
+            b->width=def->width; b->height=def->height;
+        }
+        return true;
+    }
+    return false;
 }
 
 bool actionLayoutLoadFromJson(const char *jsonString) {
@@ -357,6 +394,7 @@ bool actionLayoutLoadFromJson(const char *jsonString) {
 
     if (valid && count > 0) {
         newConfig.buttonCount = count;
+        if (actionLayoutMigrateLegacy(&newConfig)) fprintf(stderr, "TOUCH_LAYOUT migrated shipped preset geometry\n");
         currentLayout = newConfig;
         pthread_mutex_unlock(&layoutLock);
         return true;

@@ -1,6 +1,10 @@
 // Host text never enters the game's layout, font buffers or animation groups.
 #import <TargetConditionals.h>
 #include <string.h>
+#include "screen_aspect.h"
+#if TARGET_OS_IPHONE
+extern int front_screen_aspect_mode(void);
+#endif
 #if TARGET_OS_IPHONE
 #define ZeldaPromptViewBase UIView
 #define ZeldaPromptColor UIColor
@@ -57,9 +61,14 @@
     NSRectFillUsingOperation(self.bounds, NSCompositingOperationCopy);
 #endif
     CGFloat width = CGRectGetWidth(self.bounds), height = CGRectGetHeight(self.bounds);
-    CGFloat scale = MIN(width / 1920., height / 1080.);
-    CGFloat gameWidth = scale * 1920., gameHeight = scale * 1080.;
-    CGFloat left = (width - gameWidth) * .5, top = (height - gameHeight) * .5;
+#if TARGET_OS_IPHONE
+    ScreenAspectMode mode = (ScreenAspectMode)front_screen_aspect_mode();
+#else
+    ScreenAspectMode mode = ASPECT_MODE_FIT;
+#endif
+    ScreenViewport viewport = screenAspectViewport(width, height, 1920, 1080, mode);
+    CGFloat gameWidth = viewport.width, gameHeight = viewport.height;
+    CGFloat left = viewport.originX, top = viewport.originY;
     for (uint32_t i = 0; i < _prompts.count; i++) {
         const InputKeyboardPrompt *key = &_prompts.keys[i];
         NSUInteger length = 0; while (length < 7 && key->label[length]) length++;
