@@ -150,7 +150,9 @@ static void testUltrahandOrbit(void) {
     cameraTargetApi.minimum = ultraLow; cameraTargetApi.maximum = ultraHigh;
     float *pitch = (float *)(execution + 0xa4), *yaw = (float *)(execution + 0xa8);
     float *yawOffset = (float *)(execution + 0xbc);
-    *pitch = orbit[1]; *yaw = *yawOffset = orbit[2];
+    float *yawBaseline = (float *)(execution + 0xb8);
+    *yawBaseline = 12;
+    *pitch = orbit[1]; *yaw = orbit[2]; *yawOffset = orbit[2] - *yawBaseline;
     cameraAddMouseDelta(100, 100); // mode entry discards old Chase input
     cameraApplyUltrahandOrbit(orbit, execution, component); unchanged(4.8f,15,30);
     assert(cameraIsUltrahandActive());
@@ -158,9 +160,35 @@ static void testUltrahandOrbit(void) {
     cameraApplyUltrahandOrbit(orbit, execution, component);
     assert(orbit[0] == 4.8f && orbit[1] > 15 && orbit[2] < 30);
     assert(fabsf(*pitch - orbit[1]) < .0001f && fabsf(*yaw - orbit[2]) < .0001f);
-    assert(fabsf(*yawOffset - orbit[2]) < .0001f);
+    assert(fabsf(*yawOffset + *yawBaseline - orbit[2]) < .0001f);
     float savedPitch = orbit[1], savedYaw = orbit[2];
     cameraApplyUltrahandOrbit(orbit, execution, component); unchanged(4.8f,savedPitch,savedYaw);
+    // Reproduce native UltraHand auto-framing pulling the local angles back
+    // every frame, including idle frames. Swipes must still accumulate.
+    for (int frame = 0; frame < 30; frame++) {
+        testTime += .016;
+        cameraApplyPlayerOrbit(NULL, NULL, component);
+        orbit[0] = frame & 1 ? 2.0f : 4.8f;
+        orbit[1] = 15; orbit[2] = 30;
+        cameraAddTouchDelta(10, 0);
+        cameraApplyUltrahandOrbit(orbit, execution, component);
+        savedYaw = (float)remainder(savedYaw - 10 * DEFAULT_SENSITIVITY_X * ANGLE_RADIAN_SCALE * 180 / M_PI, 360);
+        assert(fabsf(orbit[2] - savedYaw) < .0001f);
+        assert(fabsf(remainderf(*yawBaseline + *yawOffset - orbit[2], 360)) < .0001f);
+        assert(orbit[1] == savedPitch && orbit[0] == (frame & 1 ? 2.0f : 4.8f));
+    }
+    for (int frame = 0; frame < 10; frame++) {
+        orbit[1] = 15; orbit[2] = 30;
+        cameraApplyUltrahandOrbit(orbit, execution, component);
+        unchanged(2, savedPitch, savedYaw);
+    }
+    // Real controller activity must immediately return angle authority.
+    cameraNoteGamepadActivity(); orbit[1] = 40; orbit[2] = 60;
+    cameraApplyUltrahandOrbit(orbit, execution, component); unchanged(2,40,60);
+    cameraAddMouseDelta(10, 0);
+    cameraApplyUltrahandOrbit(orbit, execution, component);
+    assert(orbit[2] < 60 && orbit[2] > 50 && orbit[1] == 40);
+    savedYaw = orbit[2]; orbit[0] = 4.8f;
     ultraMaximum = 50; cameraAddTouchDelta(0, 5000);
     cameraApplyUltrahandOrbit(orbit, execution, component);
     assert(orbit[1] == 50 && *pitch == 50); ultraMaximum = 170;

@@ -28,6 +28,9 @@ typedef struct {
     float stickX, stickY;
     double lastPlayerTick, lastOrbitTick, lastUltrahandTick;
     unsigned orbitMode;
+    bool ultrahandAnglesOwned;
+    const void *ultrahandExecution;
+    float ultrahandPitch, ultrahandYaw;
     const void *playerCamera;
     uintptr_t playerTarget;
     double pendingYaw, pendingPitch;
@@ -67,6 +70,7 @@ static double cameraNow(void) {
 }
 
 static void cameraDiscardInputLocked(void) {
+    globalCameraState.ultrahandAnglesOwned = false;
     globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
     globalCameraState.isTargetLocked = false;
     globalCameraState.switchPulseTicks = 0;
@@ -149,6 +153,7 @@ static void cameraApplyPlayerOrbit(float *orbit, float *pitchState, const void *
         globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
     globalCameraState.lastOrbitTick = now;
     globalCameraState.orbitMode = 1;
+    globalCameraState.ultrahandAnglesOwned = false;
     globalCameraState.isGameplayActive = valid;
     globalCameraState.lastPlayerTick = now;
     globalCameraState.playerCamera = component;
@@ -213,13 +218,17 @@ static void cameraApplyUltrahandOrbit(float *orbit, void *execution, const void 
     if (!active) cameraDiscardInputLocked();
     float *pitch = (float *)((char *)execution + 0xa4);
     float *yaw = (float *)((char *)execution + 0xa8);
+    float *yawBaseline = (float *)((char *)execution + 0xb8);
     float *yawOffset = (float *)((char *)execution + 0xbc);
-    valid = valid && isfinite(*pitch) && isfinite(*yaw) && isfinite(*yawOffset);
+    valid = valid && isfinite(*pitch) && isfinite(*yaw) && isfinite(*yawBaseline) && isfinite(*yawOffset);
     bool continuous = globalCameraState.playerCamera == component && globalCameraState.playerTarget == target &&
-        now - globalCameraState.lastPlayerTick <= PLAYER_CAMERA_TIMEOUT && globalCameraState.orbitMode == 2;
+        now - globalCameraState.lastOrbitTick <= PLAYER_CAMERA_TIMEOUT && globalCameraState.orbitMode == 2 &&
+        globalCameraState.ultrahandExecution == execution;
     if (!valid || !continuous || !globalCameraState.config.nativeUltrahand ||
-        globalCameraState.rightStickOnly || globalCameraState.isTargetLocked)
+        globalCameraState.rightStickOnly || globalCameraState.isTargetLocked) {
         globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
+        globalCameraState.ultrahandAnglesOwned = false;
+    }
     static int trace = -1;
     if (trace < 0) trace = getenv("ZELDA_CAMERA_TRACE") != NULL;
     if (trace && (globalCameraState.orbitMode != 2 || globalCameraState.pendingYaw || globalCameraState.pendingPitch))
@@ -227,6 +236,7 @@ static void cameraApplyUltrahandOrbit(float *orbit, void *execution, const void 
             valid, globalCameraState.config.nativeUltrahand, globalCameraState.rightStickOnly,
             minimum, maximum, globalCameraState.pendingYaw, globalCameraState.pendingPitch);
     globalCameraState.orbitMode = 2;
+    globalCameraState.ultrahandExecution = execution;
     globalCameraState.lastUltrahandTick = active ? now : 0;
     // Invalid parameters must leave input on the right-stick fallback path.
     globalCameraState.lastOrbitTick = valid ? now : 0;
@@ -234,18 +244,29 @@ static void cameraApplyUltrahandOrbit(float *orbit, void *execution, const void 
     globalCameraState.isGameplayActive = active;
     globalCameraState.playerCamera = component;
     globalCameraState.playerTarget = target;
-    if (valid && (globalCameraState.pendingYaw || globalCameraState.pendingPitch)) {
+    if (valid && (globalCameraState.pendingYaw || globalCameraState.pendingPitch) &&
+        !globalCameraState.ultrahandAnglesOwned) {
+        globalCameraState.ultrahandPitch = orbit[1];
+        globalCameraState.ultrahandYaw = orbit[2];
+        globalCameraState.ultrahandAnglesOwned = true;
+    }
+    if (valid && globalCameraState.ultrahandAnglesOwned) {
+        // UltraHand's vtable+0x168 auto-framing branch smooths the local polar
+        // angles anew each frame (0x23d91d0). It does not use a4/a8/bc like the
+        // generic Target input branch. Accumulate user angles independently so
+        // native auto-framing cannot undo each swipe on the following frame.
+        // Only angles are retained: native target, arm length and collision
+        // continue to update. Reset/gamepad/R/mode changes release ownership.
         const double degrees = 180.0 / M_PI;
-        float newPitch = (float)fmax(minimum, fmin(maximum, orbit[1] + globalCameraState.pendingPitch * degrees));
-        float pitchDelta = newPitch - orbit[1];
-        double yawDelta = globalCameraState.pendingYaw * degrees;
-        orbit[1] = newPitch;
-        orbit[2] = (float)remainder(orbit[2] + yawDelta, 360);
-        *pitch = (float)fmax(minimum, fmin(maximum, *pitch + pitchDelta));
-        *yaw = (float)remainder(*yaw + yawDelta, 360);
-        // The next native frame reconstructs longitude from its baseline and
-        // offset. Keep the offset in step so a stopped swipe does not rebound.
-        *yawOffset = (float)remainder(*yawOffset + yawDelta, 360);
+        float newPitch = (float)fmax(minimum, fmin(maximum,
+            globalCameraState.ultrahandPitch + globalCameraState.pendingPitch * degrees));
+        float newYaw = (float)remainder(globalCameraState.ultrahandYaw +
+            globalCameraState.pendingYaw * degrees, 360);
+        orbit[1] = *pitch = globalCameraState.ultrahandPitch = newPitch;
+        orbit[2] = *yaw = globalCameraState.ultrahandYaw = newYaw;
+        // Keep the generic Target branch's baseline-relative accumulator in
+        // step if native policy switches branches during this execution.
+        *yawOffset = (float)remainder(newYaw - *yawBaseline, 360);
     }
     if (valid) {
         globalCameraState.currentPitch = orbit[1] * (float)(M_PI / 180);
@@ -377,6 +398,7 @@ bool cameraPoll(int32_t *outRx, int32_t *outRy) {
 void cameraSetMouseCaptured(bool captured) {
     pthread_mutex_lock(&cameraLock);
     globalCameraState.mouseCaptured = captured;
+    globalCameraState.ultrahandAnglesOwned = false;
     globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
     globalCameraState.stickX = globalCameraState.stickY = 0;
     pthread_mutex_unlock(&cameraLock);
@@ -392,6 +414,7 @@ bool cameraIsMouseCaptured(void) {
 void cameraToggleMouseCapture(void) {
     pthread_mutex_lock(&cameraLock);
     globalCameraState.mouseCaptured = !globalCameraState.mouseCaptured;
+    globalCameraState.ultrahandAnglesOwned = false;
     globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
     pthread_mutex_unlock(&cameraLock);
 }
@@ -487,6 +510,7 @@ void cameraSetRightStickMode(bool enabled) {
         globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
         globalCameraState.stickX = globalCameraState.stickY = 0;
         globalCameraState.rightStickOnly = enabled;
+        globalCameraState.ultrahandAnglesOwned = false;
     }
     pthread_mutex_unlock(&cameraLock);
 }
@@ -506,6 +530,7 @@ void cameraSetConfig(const CameraConfig *newConfig) {
         isfinite(newConfig->accelerationFactor) && newConfig->accelerationFactor >= 0 && newConfig->accelerationFactor <= 1)
     {
         if (globalCameraState.config.nativeUltrahand != newConfig->nativeUltrahand) {
+            globalCameraState.ultrahandAnglesOwned = false;
             globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
             globalCameraState.stickX = globalCameraState.stickY = 0;
         }

@@ -84,7 +84,7 @@
     "host/camera_controller.inc": {
       "base": null,
       "overlay": {
-        "sha256": "512d411372c4f3f4ffd39e3bbcb1248e97aed67dc87444cebd6c43973ed88a64",
+        "sha256": "3b7565f09efb79fc58fc48eae7f17cbc48e85c18ef68df65aed81f45822f9dcf",
         "mode": 420
       }
     },
@@ -639,7 +639,7 @@
     "tests/test_camera_controller.c": {
       "base": null,
       "overlay": {
-        "sha256": "ae86245b061f63d1dbb4af4295a46c345250bc52bc29f52cfbd8b1a727422bf8",
+        "sha256": "d006191d369ae0e4be387a4356b1514521410f3fe41b8c239f61f55064221794",
         "mode": 420
       }
     },
