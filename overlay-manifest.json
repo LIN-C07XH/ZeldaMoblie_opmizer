@@ -84,7 +84,7 @@
     "host/camera_controller.inc": {
       "base": null,
       "overlay": {
-        "sha256": "3b7565f09efb79fc58fc48eae7f17cbc48e85c18ef68df65aed81f45822f9dcf",
+        "sha256": "397b2d61df400dbc2bd1d017eecccfcd484d88453f657e21de4fd072c20946bf",
         "mode": 420
       }
     },

@@ -69,6 +69,39 @@ static double cameraNow(void) {
 #endif
 }
 
+// Bounded session diagnostics: distinguish missing guest hooks from dropped
+// host input without enabling a per-event trace or retaining guest pointers.
+static struct {
+    unsigned long input, nativeInput, stickInput, chase, lifecycle, ultra, applied, resets;
+    unsigned long lifecycleDrops, chaseDrops, ultraDrops, chaseReleases;
+    unsigned long reportedInput;
+    double reportTick;
+    unsigned reject;
+    float minimum, maximum, beforePitch, beforeYaw, afterPitch, afterYaw;
+} cameraDiagnostics;
+
+static void cameraReportRoutingLocked(void) {
+#ifndef UNIT_TEST
+    double now = cameraNow();
+    if (cameraDiagnostics.input == cameraDiagnostics.reportedInput || now - cameraDiagnostics.reportTick < 1) return;
+    cameraDiagnostics.reportTick = now;
+    cameraDiagnostics.reportedInput = cameraDiagnostics.input;
+    fprintf(stderr, "[CAMERA_ROUTE] input=%lu native=%lu stick=%lu callbacks=(%lu,%lu,%lu) ultra_apply=%lu resets=%lu drops=(%lu,%lu,%lu) chase_release=%lu reject=%#x mode=%u direct=%d stick_only=%d captured=%d owned=%d ages=(%.3f,%.3f) pending=(%.5f,%.5f) limits=(%.2f,%.2f) ultra_angles=(%.2f,%.2f)->(%.2f,%.2f)\n",
+        cameraDiagnostics.input, cameraDiagnostics.nativeInput, cameraDiagnostics.stickInput,
+        cameraDiagnostics.lifecycle, cameraDiagnostics.chase, cameraDiagnostics.ultra,
+        cameraDiagnostics.applied, cameraDiagnostics.resets, cameraDiagnostics.lifecycleDrops,
+        cameraDiagnostics.chaseDrops, cameraDiagnostics.ultraDrops, cameraDiagnostics.chaseReleases,
+        cameraDiagnostics.reject,
+        globalCameraState.orbitMode, globalCameraState.config.nativeUltrahand,
+        globalCameraState.rightStickOnly, globalCameraState.mouseCaptured,
+        globalCameraState.ultrahandAnglesOwned, now - globalCameraState.lastOrbitTick,
+        now - globalCameraState.lastUltrahandTick, globalCameraState.pendingYaw,
+        globalCameraState.pendingPitch, cameraDiagnostics.minimum, cameraDiagnostics.maximum,
+        cameraDiagnostics.beforePitch, cameraDiagnostics.beforeYaw,
+        cameraDiagnostics.afterPitch, cameraDiagnostics.afterYaw);
+#endif
+}
+
 static void cameraDiscardInputLocked(void) {
     globalCameraState.ultrahandAnglesOwned = false;
     globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
@@ -112,6 +145,7 @@ static void cameraApplyPlayerOrbit(float *orbit, float *pitchState, const void *
 
     pthread_mutex_lock(&cameraLock);
     double now = cameraNow();
+    if (orbitUpdate) cameraDiagnostics.chase++; else cameraDiagnostics.lifecycle++;
     bool valid = target && !(flags & 3) && !zelda_is_movie();
     if (orbitUpdate) valid = valid && isfinite(orbit[0]) && orbit[0] > 0 && orbit[0] < 500 &&
         isfinite(orbit[1]) && isfinite(orbit[2]) && isfinite(*pitchState);
@@ -140,8 +174,10 @@ static void cameraApplyPlayerOrbit(float *orbit, float *pitchState, const void *
         }
         // PreUpdate also runs in lock-on/aim modes. Keep their native buttons
         // alive, but discard motion if the previous frame never ran Chase.
-        if (globalCameraState.lastOrbitTick < globalCameraState.lastPlayerTick || !valid)
+        if (globalCameraState.lastOrbitTick < globalCameraState.lastPlayerTick || !valid) {
+            if (globalCameraState.pendingYaw || globalCameraState.pendingPitch) cameraDiagnostics.lifecycleDrops++;
             globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
+        }
         globalCameraState.isGameplayActive = valid;
         globalCameraState.lastPlayerTick = now;
         globalCameraState.playerCamera = component;
@@ -149,10 +185,13 @@ static void cameraApplyPlayerOrbit(float *orbit, float *pitchState, const void *
         pthread_mutex_unlock(&cameraLock);
         return;
     }
-    if (now - globalCameraState.lastOrbitTick > PLAYER_CAMERA_TIMEOUT || globalCameraState.orbitMode != 1 || globalCameraState.isTargetLocked || globalCameraState.rightStickOnly)
+    if (now - globalCameraState.lastOrbitTick > PLAYER_CAMERA_TIMEOUT || globalCameraState.orbitMode != 1 || globalCameraState.isTargetLocked || globalCameraState.rightStickOnly) {
+        if (globalCameraState.pendingYaw || globalCameraState.pendingPitch) cameraDiagnostics.chaseDrops++;
         globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
+    }
     globalCameraState.lastOrbitTick = now;
     globalCameraState.orbitMode = 1;
+    if (globalCameraState.ultrahandAnglesOwned) cameraDiagnostics.chaseReleases++;
     globalCameraState.ultrahandAnglesOwned = false;
     globalCameraState.isGameplayActive = valid;
     globalCameraState.lastPlayerTick = now;
@@ -213,6 +252,9 @@ static void cameraApplyUltrahandOrbit(float *orbit, void *execution, const void 
     }
     pthread_mutex_lock(&cameraLock);
     double now = cameraNow();
+    cameraDiagnostics.ultra++;
+    cameraDiagnostics.minimum = minimum; cameraDiagnostics.maximum = maximum;
+    cameraDiagnostics.beforePitch = orbit[1]; cameraDiagnostics.beforeYaw = orbit[2];
     bool valid = active && limits && isfinite(orbit[0]) && orbit[0] > 0 && orbit[0] < 500 &&
         isfinite(orbit[1]) && isfinite(orbit[2]);
     if (!active) cameraDiscardInputLocked();
@@ -224,8 +266,12 @@ static void cameraApplyUltrahandOrbit(float *orbit, void *execution, const void 
     bool continuous = globalCameraState.playerCamera == component && globalCameraState.playerTarget == target &&
         now - globalCameraState.lastOrbitTick <= PLAYER_CAMERA_TIMEOUT && globalCameraState.orbitMode == 2 &&
         globalCameraState.ultrahandExecution == execution;
-    if (!valid || !continuous || !globalCameraState.config.nativeUltrahand ||
-        globalCameraState.rightStickOnly || globalCameraState.isTargetLocked) {
+    cameraDiagnostics.reject = (!active ? 1u : 0) | (!limits ? 2u : 0) | (!valid ? 4u : 0) |
+        (!continuous ? 8u : 0) | (!globalCameraState.config.nativeUltrahand ? 16u : 0) |
+        (globalCameraState.rightStickOnly ? 32u : 0) | (globalCameraState.isTargetLocked ? 64u : 0);
+    if (cameraDiagnostics.reject) {
+        cameraDiagnostics.resets++;
+        if (globalCameraState.pendingYaw || globalCameraState.pendingPitch) cameraDiagnostics.ultraDrops++;
         globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
         globalCameraState.ultrahandAnglesOwned = false;
     }
@@ -251,6 +297,7 @@ static void cameraApplyUltrahandOrbit(float *orbit, void *execution, const void 
         globalCameraState.ultrahandAnglesOwned = true;
     }
     if (valid && globalCameraState.ultrahandAnglesOwned) {
+        cameraDiagnostics.applied++;
         // UltraHand's vtable+0x168 auto-framing branch smooths the local polar
         // angles anew each frame (0x23d91d0). It does not use a4/a8/bc like the
         // generic Target input branch. Accumulate user angles independently so
@@ -273,6 +320,8 @@ static void cameraApplyUltrahandOrbit(float *orbit, void *execution, const void 
         globalCameraState.currentYaw = orbit[2] * (float)(M_PI / 180);
         globalCameraState.targetDistance = orbit[0];
     }
+    cameraDiagnostics.afterPitch = orbit[1]; cameraDiagnostics.afterYaw = orbit[2];
+    cameraReportRoutingLocked();
     globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
     pthread_mutex_unlock(&cameraLock);
 }
@@ -290,6 +339,7 @@ bool cameraBindSharedState(void *statePtr) {
     cameraTargetApi.maximum = (void *)(base + 0x18a9598);
     __atomic_store_n(&state->callback, (uintptr_t)cameraApplyPlayerOrbit, __ATOMIC_RELEASE);
     __atomic_store_n(&state->ultrahandCallback, (uintptr_t)cameraApplyUltrahandOrbit, __ATOMIC_RELEASE);
+    fprintf(stderr, "[CAMERA_BRIDGE] CAM3 UltraHand persistent angles; routing diagnostics v1\n");
     return true;
 }
 
@@ -314,6 +364,7 @@ void cameraReset(void) {
 }
 
 static void cameraAccumulateLocked(float deltaX, float deltaY) {
+    cameraDiagnostics.nativeInput++;
     double accel = 1;
     if (!globalCameraState.config.rawMouseMode)
         accel += globalCameraState.config.accelerationFactor * hypot((double)deltaX, deltaY);
@@ -330,8 +381,10 @@ static void cameraAccumulateLocked(float deltaX, float deltaY) {
 void cameraAddMouseDelta(float deltaX, float deltaY) {
     if (!isfinite(deltaX) || !isfinite(deltaY)) return;
     pthread_mutex_lock(&cameraLock);
+    cameraDiagnostics.input++;
     if (globalCameraState.mouseCaptured) {
         if (!cameraNativeOrbitLocked()) {
+            cameraDiagnostics.stickInput++;
             globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
             globalCameraState.stickX += deltaX;
             globalCameraState.stickY -= deltaY;
@@ -349,18 +402,22 @@ void cameraAddMouseDelta(float deltaX, float deltaY) {
             cameraAccumulateLocked(deltaX, deltaY);
         }
     }
+    cameraReportRoutingLocked();
     pthread_mutex_unlock(&cameraLock);
 }
 
 void cameraAddTouchDelta(float deltaX, float deltaY) {
     if (!isfinite(deltaX) || !isfinite(deltaY)) return;
     pthread_mutex_lock(&cameraLock);
+    cameraDiagnostics.input++;
     if (!cameraNativeOrbitLocked()) {
+        cameraDiagnostics.stickInput++;
         globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
         globalCameraState.stickX += deltaX; globalCameraState.stickY -= deltaY;
         globalCameraState.stickTick = cameraNow();
     } else if (!globalCameraState.isTargetLocked)
         cameraAccumulateLocked(deltaX, deltaY);
+    cameraReportRoutingLocked();
     pthread_mutex_unlock(&cameraLock);
 }
 
