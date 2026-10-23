@@ -37,5 +37,13 @@ int main(void) {
     state=sample(); assert(state.lx>0 && state.ly>0 && state.rx>0 && state.ry>0);
     inputTouchControllerClear(); assert(sample().rx>0);
     input_clear(); state=sample(); assert(!state.buttons && !state.rx);
+    cameraSetMouseCaptured(true);
+    input_key(18, true); cameraAddMouseDelta(30, 0); state=sample();
+    assert((state.buttons & (1u<<14)) && state.rx > 0);
+    input_key(18, false); state=sample(); assert(!(state.buttons & (1u<<14)) && !state.rx);
+    inputTouchButton(1u<<12, true); cameraAddTouchDelta(-30, 0); state=sample();
+    assert((state.buttons & (1u<<12)) && state.rx < 0);
+    inputTouchButton(1u<<12, false); assert(!sample().rx);
+    inputScrollEquipment(1); assert(!sample().buttons);
     puts("Touch input: title confirmation, four axes, pulses, independent sources, clearing and controller priority passed");
 }

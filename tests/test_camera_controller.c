@@ -12,13 +12,14 @@ bool zelda_is_movie(void) { return movie; }
 
 static unsigned char component[0xd00];
 static float orbit[3], pitchState;
-static void tick(void) { cameraApplyPlayerOrbit(orbit, &pitchState, component); }
+static void tick(void) { cameraApplyPlayerOrbit(NULL, NULL, component); cameraApplyPlayerOrbit(orbit, &pitchState, component); }
 static void setup(void) {
     cameraInit(); movie = false; testTime += 1;
     memset(component, 0, sizeof component);
     uintptr_t target = 0x1234;
     memcpy(component + 0xc90, &target, sizeof target);
     orbit[0] = 4.8f; orbit[1] = pitchState = 15; orbit[2] = 30;
+    component[0x96c] = 1;
     tick(); cameraSetMouseCaptured(true);
 }
 static void unchanged(float distance, float pitch, float yaw) {
@@ -104,7 +105,31 @@ static void testNativeModesKeepLockAndDropMotion(void) {
     }
     cameraToggleTargetLock();
     cameraAddMouseDelta(100, 100);
-    tick(); unchanged(4.8f, 15, 30); // no motion accumulated through another mode
+    int32_t x, y; assert(cameraPoll(&x, &y) && x > 0 && y < 0);
+    tick(); unchanged(4.8f, 15, 30); // other modes use the native right stick
+}
+static void testNativeTargetLossAndEmptyHold(void) {
+    setup(); component[0x96c] = 0; testTime += .11; tick();
+    cameraHandleLockDragButton(true);
+    assert(!cameraIsTargetLocked() && cameraGetTargetLockButtons() == ZL_BUTTON_MASK);
+    cameraHandleLockDragButton(false);
+    assert(!cameraGetTargetLockButtons());
+    cameraHandleLockDragButton(true); component[0x96c] = 1; tick();
+    cameraHandleLockDragButton(false); assert(cameraIsTargetLocked());
+    component[0x96c] = 0; testTime += .11; tick();
+    assert(!cameraIsTargetLocked() && !cameraGetTargetLockButtons());
+}
+static void testEquipmentAndMenuRouting(void) {
+    setup(); cameraSetRightStickMode(true); cameraAddMouseDelta(20, 5);
+    int32_t x, y; assert(cameraPoll(&x, &y) && x > 0 && y < 0);
+    tick(); unchanged(4.8f, 15, 30);
+    assert(!cameraPoll(&x, &y));
+    cameraSetRightStickMode(false); cameraAddTouchDelta(20, 0); tick();
+    assert(orbit[2] < 30);
+    cameraSetGameplayActive(false); assert(cameraIsMouseCaptured());
+    cameraAddMouseDelta(-20, 5); assert(cameraPoll(&x, &y) && x < 0 && y < 0);
+    cameraAddTouchDelta(20, -5); assert(cameraPoll(&x, &y) && x > 0 && y > 0);
+    cameraAddMouseDelta(20, 0); cameraReset(); assert(!cameraPoll(&x, &y));
 }
 static void testBoundBridge(void) {
     ZeldaCameraSharedState shared = {.magic = "CAM2", .version = 2};
@@ -119,6 +144,7 @@ int main(void) {
     testNativeOrbitAndConsumption(); testLinearAndTouchInput();
     testTitleAndMovieGates(); testTransitionsDropQueuedInput();
     testPitchAndInvalidValues(); testLockKeepsNativeCamera();
-    testNativeModesKeepLockAndDropMotion(); testBoundBridge();
+    testNativeModesKeepLockAndDropMotion(); testNativeTargetLossAndEmptyHold();
+    testEquipmentAndMenuRouting(); testBoundBridge();
     puts("PASS: native player orbit, unchanged arm, mouse/touch, lifecycle, transitions, lock, CAM2 bridge");
 }

@@ -23,11 +23,7 @@ void inputNoteDevice(InputDevice device) { atomic_store_explicit(&lastInputDevic
 InputDevice inputGetDevice(void) { return atomic_load_explicit(&lastInputDevice, memory_order_relaxed); }
 
 void inputScrollEquipment(int direction) {
-    bool mayOpen = cameraIsGameplayActive();
-    pthread_mutex_lock(&input_lock);
-    bool accepted = equipmentWheelScroll(&equipmentWheel, direction, cameraNow(), mayOpen);
-    pthread_mutex_unlock(&input_lock);
-    if (accepted) inputNoteDevice(INPUT_DEVICE_KEYBOARD_MOUSE);
+    (void)direction; // Equipment is selected by holding its key and moving the right stick.
 }
 void inputCancelEquipmentScroll(void) {
     pthread_mutex_lock(&input_lock);
@@ -66,6 +62,13 @@ static const struct { unsigned key; uint64_t button; } mapping[] = {
     {123, 1u << 12}, {126, 1u << 13}, {124, 1u << 14}, {125, 1u << 15},
 };
 
+static void inputUpdateStickModeLocked(void) {
+    uint64_t held = touch_buttons | virtual_buttons;
+    for (unsigned i = 0; i < sizeof mapping / sizeof *mapping; i++)
+        if (keys[mapping[i].key]) held |= mapping[i].button;
+    cameraSetRightStickMode((held & ((1u << 12) | (1u << 13) | (1u << 14))) != 0);
+}
+
 void input_key(unsigned code, int pressed) {
     if (code >= sizeof keys) return;
     if (pressed) inputNoteDevice(INPUT_DEVICE_KEYBOARD_MOUSE);
@@ -76,6 +79,7 @@ void input_key(unsigned code, int pressed) {
             equipmentWheelReset(&equipmentWheel);
         }
     keys[code] = !!pressed;
+    inputUpdateStickModeLocked();
     pthread_mutex_unlock(&input_lock);
 }
 
@@ -85,6 +89,7 @@ void input_clear(void) {
     memset(touch_axes, 0, sizeof touch_axes);
     equipmentWheelReset(&equipmentWheel);
     cameraReset();
+    cameraSetRightStickMode(false);
     pthread_mutex_unlock(&input_lock);
 }
 
@@ -105,6 +110,7 @@ static void input_button(uint64_t buttonMask, bool pressed, InputDevice device) 
     } else {
         touch_buttons &= ~buttonMask;
     }
+    inputUpdateStickModeLocked();
     pthread_mutex_unlock(&input_lock);
 }
 
@@ -128,6 +134,7 @@ void inputTouchController(uint64_t buttons, float lx, float ly, float rx, float 
     buttons &= 0xffff;
     virtual_latched |= buttons & ~virtual_buttons;
     virtual_buttons = buttons;
+    inputUpdateStickModeLocked();
     for (unsigned i = 0; i < 2; i++) {
         float x = axes[i * 2], y = axes[i * 2 + 1];
         if (!isfinite(x) || !isfinite(y) || hypotf(x, y) < .12f) x = y = 0;
@@ -139,6 +146,7 @@ void inputTouchController(uint64_t buttons, float lx, float ly, float rx, float 
 void inputTouchControllerClear(void) {
     pthread_mutex_lock(&input_lock);
     virtual_buttons = virtual_latched = 0;
+    inputUpdateStickModeLocked();
     memset(touch_axes, 0, sizeof touch_axes);
     pthread_mutex_unlock(&input_lock);
 }
@@ -195,15 +203,6 @@ int input_states(ZeldaPadState *out, int count, uint32_t id, uint32_t style) {
 
         // 智能锁敌系统：自动注入 ZL 注视状态与切怪脉冲
         out->buttons |= cameraGetTargetLockButtons();
-        uint64_t wheelButtons; int32_t wheelRx;
-        if (equipmentWheelPoll(&equipmentWheel, cameraNow(), &wheelButtons, &wheelRx)) {
-            // The quick menu owns the right stick until its release sample.
-            // Use current held buttons, not latched pulses, so repeated HID
-            // reads cannot replay a menu-opening edge or repeat a scroll step.
-            out->buttons &= ~((1ull << 12) | (1ull << 13) | (1ull << 14) | (1ull << 15));
-            out->buttons |= wheelButtons;
-            out->rx = wheelRx; out->ry = 0;
-        }
         out->attributes = 3; // Connected and wired.
     }
     pthread_mutex_unlock(&input_lock);

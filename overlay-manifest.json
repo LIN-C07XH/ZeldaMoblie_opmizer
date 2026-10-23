@@ -77,14 +77,14 @@
     "host/camera_controller.h": {
       "base": null,
       "overlay": {
-        "sha256": "79d69a1c8c5780daae10406574a9d2fd2b9c10145ea69ee88fa1344dea71a644",
+        "sha256": "d041f64f045bd020bcbbdd1a820a8a700ea1dd3ece27daf5ebd257afa9b3ab3e",
         "mode": 420
       }
     },
     "host/camera_controller.inc": {
       "base": null,
       "overlay": {
-        "sha256": "75a53b1f73168b919a6c327073ad4a9bd4cc4c465791e45f9a7a673e043cea5a",
+        "sha256": "6da8160cf33400574eb80a611d3d1b76b54a5e4a24b02f09313380b28d8238fc",
         "mode": 420
       }
     },
@@ -161,7 +161,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "a87400c27b028d749740843f30e14e6d9df634bd84a5d979733a4be08e812356",
+        "sha256": "a0490a8f9b08befbccb96c02d5d55ecfd66f10aebe84edce19e3f109fbdd8ebe",
         "mode": 420
       }
     },
@@ -171,7 +171,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "b8a8d3fc782db276226538b9e54886fc3ab9998ead1e9fb51c62d04ebcbc8e47",
+        "sha256": "d4580095e5d74171a672732351eddd85d5b406f1226e75df4aa4ff0b3e03e63d",
         "mode": 420
       }
     },
@@ -496,7 +496,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "a7aaa4809caaf2114743bf285a8f5a70050e3c5fbf4d04074049c67a4aa8c9d3",
+        "sha256": "c171862c9d675973a0896663d4ca457206510e831f64d39b1a21b93e2ba202b6",
         "mode": 420
       }
     },
@@ -520,7 +520,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "103c717e60792f1f81a656d767f6152de8681cb7ceef579b25ce186f32985a1b",
+        "sha256": "6ff6d2c3bf3ee027460176c70ca951ec55b481058a50b9baf91a607f4c208ad8",
         "mode": 420
       }
     },
@@ -550,7 +550,7 @@
         "mode": 493
       },
       "overlay": {
-        "sha256": "fc073ae8fc5ba47e94ba4ffb82fce28196e9865c0f0f6b911e52a92d59d464a4",
+        "sha256": "47acc06def19d1b522a714fdeddd5d62f1dbc227187a0b387c7ffbc04af91f78",
         "mode": 493
       }
     },
@@ -568,6 +568,13 @@
       },
       "overlay": {
         "sha256": "262a918f74044071f6de7636e96633609366194c9968f3f6b103ebb78495cbad",
+        "mode": 420
+      }
+    },
+    "script/prepare_ios_shader_support.py": {
+      "base": null,
+      "overlay": {
+        "sha256": "59489a248dd3ffb4d0c356bcd7cdd811fd284baba7c6d34bf5ba23483a34057b",
         "mode": 420
       }
     },
@@ -592,6 +599,16 @@
       "base": null,
       "overlay": {
         "sha256": "ae9f55c626157bad257f9b7805427a158b2f68a6acd2b0780d4530ce774ee08c",
+        "mode": 420
+      }
+    },
+    "script/shader_pairs.py": {
+      "base": {
+        "sha256": "5cf027274fee6d431d74a59f4b2420dd03ef00a94e15976abc4fe86033744b05",
+        "mode": 420
+      },
+      "overlay": {
+        "sha256": "3dd3f3ffad15fc96a4dcf378fc4fe0200c3a82288c448a2b46aaf85ee65c74e9",
         "mode": 420
       }
     },
@@ -622,7 +639,7 @@
     "tests/test_camera_controller.c": {
       "base": null,
       "overlay": {
-        "sha256": "9af1062151777de34fcb8d8cb1b571658342eadf2e6266e147c6385bf7904b70",
+        "sha256": "8d1718a2ba3c133d76c69f271d86ef199a67042cdc4566eebe03ef09c3ba43bb",
         "mode": 420
       }
     },
@@ -688,6 +705,13 @@
       "base": null,
       "overlay": {
         "sha256": "f014b37d5ee85f98f81217f3aaf4ae5060a56b42a178063b6b795c89329239f5",
+        "mode": 420
+      }
+    },
+    "tests/test_ios_shader_support.py": {
+      "base": null,
+      "overlay": {
+        "sha256": "4e0b28289f7fb4f5ec1c74e5814fcf0bead5b65ce84f35d7184543c43c93f779",
         "mode": 420
       }
     },
@@ -767,7 +791,7 @@
     "tests/test_touch_input.c": {
       "base": null,
       "overlay": {
-        "sha256": "53e7e9448f673e5756af65a990856df1772f4356530a0f12588693cd7d313ae7",
+        "sha256": "eaac2c72f89281ce51d0dcee2c97173f7261c7a1f932e79b0ec43c0f8c0cb852",
         "mode": 420
       }
     },
@@ -791,7 +815,7 @@
     "tools/camera_hook.py": {
       "base": null,
       "overlay": {
-        "sha256": "54d66494a6874bcd05d7911772fac5df2c01f7411f15ab45bebfd8516e2dcfec",
+        "sha256": "f717d608807a3d3e85432dcbba73702b2079cc22764218552da75739c4fbfd68",
         "mode": 420
       }
     },
@@ -2964,10 +2988,6 @@
     },
     "script/shader_coverage.py": {
       "sha256": "590d41ea8dcd57f308538e369240929a6bf4ffbf37e13cd7bf1196f160add6d4",
-      "mode": 420
-    },
-    "script/shader_pairs.py": {
-      "sha256": "5cf027274fee6d431d74a59f4b2420dd03ef00a94e15976abc4fe86033744b05",
       "mode": 420
     },
     "script/spirv_subgroup.py": {

@@ -23,6 +23,8 @@ void cameraAddMouseDelta(float deltaX, float deltaY);
 
 /// 接收来自移动端触屏划动的位移增量
 void cameraAddTouchDelta(float deltaX, float deltaY);
+/// 装备选择等输入由游戏原生右摇杆处理。
+void cameraSetRightStickMode(bool enabled);
 
 /// 在输入采样时轮询相机输出，如果有主动输入则写入 outRx, outRy 并返回 true
 bool cameraPoll(int32_t *outRx, int32_t *outRy);

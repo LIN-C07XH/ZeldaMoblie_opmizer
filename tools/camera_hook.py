@@ -19,6 +19,12 @@ LIFECYCLE_ORIGINAL = bytes.fromhex('890640f9')  # ldr x9,[x20,#8]
 ORIGINAL = bytes.fromhex('08c15839')  # ldrb w8,[x8,#0x630]
 # Independent anchors reject a coincidental byte match or changed call chain.
 ANCHORS = {
+    # PlayerCamera native attention state = component+0x490; +0x4dc
+    # clears each frame and only sets bit 0 after validating a lock-on client.
+    0x87532c: bytes.fromhex('68421291'),
+    0x8759f8: bytes.fromhex('1e030094'),
+    0x87669c: bytes.fromhex('1fdc04b9'),
+    0x876d70: bytes.fromhex('68de44b90901003269de04b9'),
     0x18e414: bytes.fromhex('ef3bb66d'),  # stp d15,d14,[sp,#-0xa0]!
     0x18f108: bytes.fromhex('ec4740bd'),          # ldr s12,[sp,#0x44]
     0x18f170: bytes.fromhex('003903bd'),          # str s0,[x8,#0x338]

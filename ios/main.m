@@ -171,6 +171,26 @@ void front_run(void (*guest)(void)) {
 
     NSString *directory = [[documents stringByAppendingPathComponent:@"work/shaders"]
         stringByAppendingPathComponent:@"b-" DMSH_CHAIN];
+    NSString *support = [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"shader-support/b-" DMSH_CHAIN];
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSArray<NSString *> *supportFiles = [fm contentsOfDirectoryAtPath:support error:nil];
+    if (supportFiles.count != 4) {
+        status(@"缺少视频着色器支持资源，请重新构建 iOS 应用。");
+        return;
+    }
+    [fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:nil];
+    for (NSString *file in supportFiles) {
+        NSString *destination = [directory stringByAppendingPathComponent:file];
+        if (![fm fileExistsAtPath:destination]) {
+            NSError *error = nil;
+            if (![fm copyItemAtPath:[support stringByAppendingPathComponent:file] toPath:destination error:&error]) {
+                fprintf(stderr, "IOS_MOVIE_SHADER copy failed code=%ld\n", (long)error.code);
+                status(@"视频着色器资源无法准备，请检查可用空间后重启。");
+                return;
+            }
+            fprintf(stderr, "IOS_MOVIE_SHADER installed %s\n", file.UTF8String);
+        }
+    }
     CFAbsoluteTime began = CFAbsoluteTimeGetCurrent();
     fprintf(stderr, "SHADER_PREP begin chain=%s scope=needed platform=ios\n", DMSH_CHAIN);
     unsigned failed = shader_prep_run(metal_layer.device, directory, ^(unsigned count, unsigned total) {
@@ -377,7 +397,7 @@ static void start_game(void) {
     fallback_toolbar.translatesAutoresizingMaskIntoConstraints = NO;
     fallback_toolbar.hidden = YES;
     [self.view addSubview:fallback_toolbar];
-    NSArray *fallbackTitles = @[@"左", @"上", @"下", @"右", @"蹲下", @"望远"];
+    NSArray *fallbackTitles = @[@"盾牌", @"材料", @"口哨", @"武器", @"蹲下", @"望远"];
     const uint64_t fallbackMasks[] = {PAD_BTN_D_LEFT, PAD_BTN_D_UP, PAD_BTN_D_DOWN, PAD_BTN_D_RIGHT, PAD_BTN_L3, PAD_BTN_R3};
     for (unsigned i = 0; i < fallbackTitles.count; i++) {
         UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
@@ -389,6 +409,12 @@ static void start_game(void) {
         [button.heightAnchor constraintEqualToConstant:44].active = YES;
         [button addTarget:self action:@selector(onPersistentButtonDown:) forControlEvents:UIControlEventTouchDown];
         [button addTarget:self action:@selector(onPersistentButtonUp:) forControlEvents:UIControlEventTouchUpInside|UIControlEventTouchUpOutside|UIControlEventTouchCancel];
+        if (button.tag & (PAD_BTN_D_LEFT | PAD_BTN_D_RIGHT | PAD_BTN_D_UP)) {
+            UIPanGestureRecognizer *selection = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleEquipmentPan:)];
+            selection.maximumNumberOfTouches = 1; selection.cancelsTouchesInView = NO;
+            [button addGestureRecognizer:selection];
+            button.accessibilityHint = @"按住并左右滑动选择";
+        }
         [fallback_toolbar addArrangedSubview:button];
     }
     [NSLayoutConstraint activateConstraints:@[
@@ -459,7 +485,7 @@ static void start_game(void) {
     __weak ZeldaController *weakSelf=self;
     self.monitor=[NSTimer scheduledTimerWithTimeInterval:1 repeats:YES block:^(NSTimer *timer){(void)timer;[weakSelf updatePerformance];}];
     [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationWillResignActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note){
-        (void)note; [weakSelf releaseAllActionButtons]; inputTouchControllerClear(); weakSelf.isPanTracking = NO;
+        (void)note; [weakSelf releaseAllActionButtons]; inputTouchControllerClear(); cameraReset(); weakSelf.isPanTracking = NO;
     }];
     [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note){
         (void)note;
@@ -494,7 +520,7 @@ static void start_game(void) {
     UIView *hit = [self.view hitTest:point withEvent:nil];
     for (UIView *view = hit; view; view = view.superview)
         if ([view isKindOfClass:UIControl.class]) return NO;
-    return !full_touch_controller && cameraIsGameplayActive() && point.x >= self.view.bounds.size.width * 0.40;
+    return guest_running && !full_touch_controller && point.x >= self.view.bounds.size.width * 0.40;
 }
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)first shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)second {
     (void)first; (void)second; return !full_touch_controller;
@@ -504,7 +530,7 @@ static void start_game(void) {
     if (gesture.state == UIGestureRecognizerStateBegan) {
         // 只允许在屏幕右半侧开始划屏转视角，防止干扰左侧虚拟摇杆移动
         [gesture setTranslation:CGPointZero inView:self.view];
-        if (cameraIsGameplayActive() && loc.x >= self.view.bounds.size.width * 0.40f) {
+        if (guest_running && loc.x >= self.view.bounds.size.width * 0.40f) {
             inputNoteDevice(INPUT_DEVICE_TOUCH);
             self.isPanTracking = YES;
         } else {
@@ -512,7 +538,7 @@ static void start_game(void) {
         }
     }
 
-    if (full_touch_controller || !cameraIsGameplayActive()) { self.isPanTracking = NO; return; }
+    if (full_touch_controller || !guest_running) { self.isPanTracking = NO; return; }
     if (!self.isPanTracking) return;
 
     if (gesture.state == UIGestureRecognizerStateChanged) {
@@ -522,6 +548,19 @@ static void start_game(void) {
         cameraAddTouchDelta((float)delta.x, (float)delta.y);
     } else if (gesture.state == UIGestureRecognizerStateEnded || gesture.state == UIGestureRecognizerStateCancelled) {
         self.isPanTracking = NO;
+    }
+}
+
+- (void)handleEquipmentPan:(UIPanGestureRecognizer *)gesture {
+    UIButton *button = (UIButton *)gesture.view;
+    if (full_touch_controller || !guest_running) return;
+    if (gesture.state == UIGestureRecognizerStateBegan) [self onPersistentButtonDown:button];
+    if (gesture.state == UIGestureRecognizerStateBegan || gesture.state == UIGestureRecognizerStateChanged) {
+        CGPoint delta = [gesture translationInView:self.view];
+        [gesture setTranslation:CGPointZero inView:self.view];
+        cameraAddTouchDelta((float)delta.x, 0);
+    } else if (gesture.state == UIGestureRecognizerStateEnded || gesture.state == UIGestureRecognizerStateCancelled || gesture.state == UIGestureRecognizerStateFailed) {
+        [self onPersistentButtonUp:button];
     }
 }
 
@@ -575,8 +614,11 @@ static void start_game(void) {
     LayoutConfig cfg = actionGetLayoutConfig();
     BOOL isLocked = cameraIsTargetLocked();
     for (UIButton *button in control_toolbar.arrangedSubviews) button.enabled = guest_running || button == control_mode_button || button == aspect_button;
-    fallback_toolbar.hidden = !guest_running || !full_touch_controller;
-    for (UIButton *button in fallback_toolbar.arrangedSubviews) button.enabled = guest_running;
+    fallback_toolbar.hidden = !guest_running;
+    for (UIButton *button in fallback_toolbar.arrangedSubviews) {
+        button.enabled = guest_running;
+        button.hidden = !full_touch_controller && !(button.tag & (PAD_BTN_D_LEFT | PAD_BTN_D_RIGHT | PAD_BTN_D_UP));
+    }
     performance_width.constant = performance_expanded ? MIN(260, MAX(130, size.width - safe.left - safe.right - 420)) : 130;
     InputInteractionPrompt prompt = {0};
     BOOL hasPrompt = inputGetInteractionPrompt(&prompt);
@@ -621,6 +663,7 @@ static void start_game(void) {
         btn.hidden = hidden;
 
         if (btnDef.padButton == PAD_BTN_ZL && isLocked) {
+            [btn setTitle:@"已锁定" forState:UIControlStateNormal];
             // 锁敌激活时高亮
             btn.backgroundColor = [UIColor colorWithRed:0.95 green:0.75 blue:0.15 alpha:0.88];
             btn.layer.borderColor = [UIColor colorWithRed:1.0 green:0.9 blue:0.3 alpha:1.0].CGColor;
@@ -628,6 +671,7 @@ static void start_game(void) {
             btn.backgroundColor = [UIColor colorWithRed:0.2 green:0.75 blue:0.95 alpha:0.88];
             btn.layer.borderColor = [UIColor colorWithRed:0.4 green:0.9 blue:1.0 alpha:1.0].CGColor;
         } else {
+            if (btnDef.padButton == PAD_BTN_ZL) [btn setTitle:touch_title(@(btnDef.title), @"注视") forState:UIControlStateNormal];
             btn.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:0.62f];
             btn.layer.borderColor = [UIColor colorWithWhite:1.0f alpha:0.45f].CGColor;
         }
@@ -662,7 +706,8 @@ static void start_game(void) {
         }
     } else {
         if (btn.padButton == PAD_BTN_ZL) {
-            cameraToggleTargetLock();
+            self.pressedActionButtons[@(sender.tag)] = @(btn.padButton);
+            cameraHandleLockDragButton(true);
             [self refreshDynamicButtonLayout];
         } else {
             self.pressedActionButtons[@(sender.tag)] = @(btn.padButton);
@@ -677,6 +722,7 @@ static void start_game(void) {
     }];
 
     NSNumber *mask = self.pressedActionButtons[@(sender.tag)];
+    if (mask.unsignedLongLongValue == PAD_BTN_ZL) cameraHandleLockDragButton(false);
     [self.pressedActionButtons removeObjectForKey:@(sender.tag)];
     if (mask && ![self.pressedActionButtons.allValues containsObject:mask]) {
         inputTouchButton(mask.unsignedLongLongValue, false);
@@ -685,6 +731,7 @@ static void start_game(void) {
 - (void)releaseAllActionButtons {
     for (NSNumber *mask in self.pressedActionButtons.allValues) inputTouchButton(mask.unsignedLongLongValue, false);
     [self.pressedActionButtons removeAllObjects];
+    cameraHandleLockDragButton(false);
 }
 
 - (void)viewDidAppear:(BOOL)animated {

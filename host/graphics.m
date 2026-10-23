@@ -337,9 +337,8 @@ void front_run(void (*guest)(void)) {
                         return nil;
                     }
 
-                    // ESC 键 (keyCode 53)：
-                    // 若当前鼠标已被捕获，按下优先释放鼠标捕获唤回系统光标
-                    if (event.keyCode == 53 && cameraIsMouseCaptured()) {
+                    // Option+ESC explicitly releases capture; plain ESC opens the menu.
+                    if (event.keyCode == 53 && (event.modifierFlags & NSEventModifierFlagOption) && cameraIsMouseCaptured()) {
                         if (event.type == NSEventTypeKeyDown) {
                             cameraSetMouseCaptured(false);
                             inputCancelEquipmentScroll();
@@ -415,11 +414,6 @@ void front_run(void (*guest)(void)) {
                 // its wheel gesture while it is open, and never release pointer
                 // capture just because climbing/cutscenes change camera mode.
                 if (event.type == NSEventTypeScrollWheel) {
-                    if (cameraIsMouseCaptured() && !event.hasPreciseScrollingDeltas &&
-                        event.momentumPhase == NSEventPhaseNone && event.scrollingDeltaY != 0) {
-                        CGFloat delta = event.scrollingDeltaY * (event.isDirectionInvertedFromDevice ? -1 : 1);
-                        inputScrollEquipment(delta > 0 ? 1 : -1);
-                    }
                     return cameraIsMouseCaptured() ? nil : event;
                 }
                 if (!cameraIsGameplayActive() && !cameraIsMouseCaptured()) return event;
@@ -514,39 +508,48 @@ void front_run(void (*guest)(void)) {
         g_keymap_label.textColor = [NSColor whiteColor];
         g_keymap_label.font = [NSFont monospacedSystemFontOfSize:11.5 weight:NSFontWeightMedium];
         g_keymap_label.stringValue =
-            @"🎮 王国之泪 PC 键鼠指南 [F1 隐藏]\n"
+            @"王国之泪 PC 键鼠指南 [F1 隐藏]\n"
             @"─────────────────────────────\n"
-            @"🖱️ 鼠标移动  : 360° 无限自由视角\n"
-            @"🖱️ 鼠标左键  : 近战普通攻击 (Y)\n"
-            @"🖱️ 鼠标右键  : 射箭拉弓/松开射出 (ZR)\n"
-            @"🖱️ 鼠标中键  : 单击锁定 / 甩动切怪\n"
-            @"🖱️ 滚轮首上/下 : 盾 / 武器\n"
-            @"⌨️ WASD     : 控制角色全向移动\n"
-            @"⌨️ Space    : 跳跃 / 滑翔伞 (X)\n"
-            @"⌨️ Shift    : 疾跑 / 冲刺闪避 (B)\n"
-            @"⌨️ E 键     : 调查/拾取/对话/骑马 (A)\n"
-            @"⌨️ Q 键     : 究极手技能轮盘 (L)\n"
-            @"⌨️ C / Ctrl : 潜行蹲下 (L3)\n"
-            @"⌨️ Tab / M  : 开启地图 (Minus)\n"
-            @"⌨️ 1/2/3/4  : 武器/盾牌/材料/口哨\n"
-            @"⌨️ ESC      : 释放光标 / 暂停菜单\n"
+            @"鼠标移动  : 360° 无限自由视角\n"
+            @"鼠标左键  : 近战普通攻击 (Y)\n"
+            @"鼠标右键  : 射箭拉弓/松开射出 (ZR)\n"
+            @"鼠标中键  : 单击锁定 / 甩动切怪\n"
+            @"按住 1/2/3 + 鼠标移动选择\n"
+            @"WASD     : 控制角色全向移动\n"
+            @"Space    : 跳跃 / 滑翔伞 (X)\n"
+            @"Shift    : 疾跑 / 冲刺闪避 (B)\n"
+            @"E 键     : 调查/拾取/对话/骑马 (A)\n"
+            @"Q 键     : 究极手技能轮盘 (L)\n"
+            @"C / Ctrl : 潜行蹲下 (L3)\n"
+            @"Tab / M  : 开启地图 (Minus)\n"
+            @"1/2/3/4  : 武器/盾牌/材料/口哨\n"
+            @"ESC      : 暂停；Option+ESC 释放光标\n"
             @"─────────────────────────────\n"
-            @"💡 左下角可呼出图形与性能设置";
+            @"左下角可呼出图形与性能设置";
         [g_keymap_hud addSubview:g_keymap_label];
         [window.contentView addSubview:g_keymap_hud positioned:NSWindowAbove relativeTo:nil];
+        NSTextField *lockStatus = [NSTextField labelWithString:@"已锁定目标（中键解除）"];
+        lockStatus.textColor = NSColor.systemYellowColor;
+        lockStatus.alignment = NSTextAlignmentCenter;
+        lockStatus.frame = NSMakeRect(window.contentView.bounds.size.width * .5 - 130,
+            window.contentView.bounds.size.height - 44, 260, 24);
+        lockStatus.autoresizingMask = NSViewMinXMargin | NSViewMaxXMargin | NSViewMinYMargin;
+        lockStatus.hidden = YES;
+        [window.contentView addSubview:lockStatus];
         NSString *keyboardGuide = g_keymap_label.stringValue;
         __block InputDevice guideDevice = INPUT_DEVICE_KEYBOARD_MOUSE;
 
         // Native camera eligibility and OS pointer capture are independent.
-        // Only ESC, focus loss, or closing the window releases capture.
+        // Only Option+ESC, focus loss, or closing the window releases capture.
         NSTimer *lifecycleTimer = [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer *timer) {
             (void)timer;
             cameraFrameSync();
+            lockStatus.hidden = !cameraIsTargetLocked();
             InputDevice device = inputGetDevice();
             if (device != guideDevice) {
                 guideDevice = device;
                 g_keymap_label.stringValue = device == INPUT_DEVICE_GAMEPAD ?
-                    @"🎮 王国之泪 手柄指南 [F1 隐藏]\n"
+                    @"王国之泪 手柄指南 [F1 隐藏]\n"
                     @"─────────────────────────────\n"
                     @"左摇杆    : 移动 / 按下潜行\n"
                     @"右摇杆    : 视角 / 按下望远镜\n"

@@ -40,6 +40,8 @@ clang -Wall -Wextra -Werror -fobjc-arc -fsanitize=address,undefined -I "$SCRIPT_
     -framework Foundation -o "$TEST_DIR/cloud_save"
 "$TEST_DIR/cloud_save"
 PYTHONPATH="$TARGET_DIR/script${PYTHONPATH:+:$PYTHONPATH}" PYTHONDONTWRITEBYTECODE=1 \
+    "$TARGET_DIR/work/venv/bin/python" -m unittest discover -s "$SCRIPT_DIR/tests" -p test_ios_shader_support.py -v
+PYTHONPATH="$TARGET_DIR/script${PYTHONPATH:+:$PYTHONPATH}" PYTHONDONTWRITEBYTECODE=1 \
     "$TARGET_DIR/work/venv/bin/python" -m unittest discover -s "$SCRIPT_DIR/tests" -p test_ui_fonts.py -v
 PYTHONPATH="$TARGET_DIR/tools${PYTHONPATH:+:$PYTHONPATH}" PYTHONDONTWRITEBYTECODE=1 \
     "$TARGET_DIR/work/venv/bin/python" -m unittest discover -s "$SCRIPT_DIR/tests" -p test_camera_hook.py -v

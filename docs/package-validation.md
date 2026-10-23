@@ -3,7 +3,7 @@
 Validated on 2026-10-23 against upstream totk-mobile commit
 `510d95b8da159c0a7da467ad51b10a5a7c7ac133`, with TotK v1.4.3 inputs.
 
-The source package contains 92 override files and fingerprints 548 unchanged
+The source package contains 95 override files and fingerprints 547 unchanged
 upstream build inputs. It includes the local Metal 3 commits and subsequent
 camera, UI, cloud-save, phone-haptics and iOS compatibility changes. No game
 resources, compiled application, credentials or saves are distributed.
@@ -125,3 +125,7 @@ adapted NVN backend were both recompiled and linked in the unsigned app. The
 current Mac app compiled and completed load-only with three modules. Neither
 app was installed on a device or started into a game session for this update.
 Physical phone gesture, layout and screen-edge acceptance remain with the user.
+
+2026-10-23 输入模式与 iOS 视频修复：滚轮入口停用；装备键按住与非 Chase 状态回退右摇杆，手机装备键支持拖动，普通 ESC 保持捕获。原生 AttentionSender 状态驱动锁定保持与解除。手机闪退记录由已有无线配对的 devicectl 只读取得：20:32 崩溃 UUID 与本地 Metal 4 构建匹配，pso_predict_rest.cold.2 主动 abort；boot.log 明确记录缺失组合 14ba7fd9ad1cc9ac 后尝试 Mac 转换器。构建脚本现在随 iOS 应用补充该组合及片元阶段的 MSL/反射数据，不分发游戏资源进源码仓库。
+
+验证结果：覆盖包完整回归通过，包含 ASan/UBSan 输入/生命周期与 Unicorn 指令锚点测试；34 项图形测试在允许访问 Metal 的环境通过。Mac `--load-only` 构建装载通过（3 模块，既有 8 个 glslc 导入未解析）。Xcode 26.2 / iOS 26 / Metal 4 的独立无签名应用构建通过，包内 4 份视频支持资源共 7380 字节逐字节匹配转换缓存。未安装或启动手机应用，未启动游戏；场景验收与手感仍由用户测试。

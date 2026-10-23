@@ -59,9 +59,11 @@ script/build_ios_deps.sh
 script/ios.sh
 script/ios_config.sh
 script/prepare_graphics.py
+script/prepare_ios_shader_support.py
 script/prepare_render_resources.py
 script/prepare_ui_fonts.py
 script/run_session.py
+script/shader_pairs.py
 script/test.sh
 script/test_metal3.sh
 tests/test_action_layout.c
@@ -74,6 +76,7 @@ tests/test_gamepad_haptics.m
 tests/test_graphics.py
 tests/test_haptic_routing.m
 tests/test_ios_config.py
+tests/test_ios_shader_support.py
 tests/test_native_ui.c
 tests/test_native_ui_hook.py
 tests/test_nvn_m3_dispatch.m
