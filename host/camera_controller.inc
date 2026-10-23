@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
+#include <stddef.h>
 
 #define DEFAULT_SENSITIVITY_X 3.2f
 #define DEFAULT_SENSITIVITY_Y 2.8f
@@ -12,406 +14,233 @@
 #define ZL_BUTTON_MASK (1u << 8)
 #define SWITCH_PULSE_DURATION 3
 #define SWITCH_DRAG_THRESHOLD 28.0f
-
-#define DEFAULT_SPRING_ARM_DISTANCE 4.8f
-#define MIN_SPRING_ARM_DISTANCE 1.5f
-#define MAX_SPRING_ARM_DISTANCE 18.0f
-#define MAX_PITCH_LIMIT 1.45f
-#define MIN_PITCH_LIMIT -1.45f
 #define ANGLE_RADIAN_SCALE 0.0022f
+#define MAX_PITCH_LIMIT 1.45f
+#define PLAYER_CAMERA_TIMEOUT 0.15
 
 typedef struct {
-    bool mouseCaptured;
-    bool isTargetLocked;
-    int switchPulseTicks;
-    int switchDirection;
-    bool isLockDragKeyDown;
+    bool mouseCaptured, isTargetLocked, isLockDragKeyDown, lockHasSwitchedInPress;
+    int switchPulseTicks, switchDirection;
     float lockDragAccumX;
-    bool lockHasSwitchedInPress;
     bool isGameplayActive;
-
-    // 方案 A：SpringArm 极坐标纯净绝对状态 (无蓄水池、无漏桶、无时间延迟)
-    float currentYaw;          // 水平旋转角 (弧度，0 ~ 2PI 循环)
-    float currentPitch;        // 垂直俯仰角 (弧度，-1.45 ~ +1.45 钳位)
-    float targetDistance;      // 目标弹簧臂长 (米，默认 4.8m)
-    bool hasInitialSync;       // 是否已与客体相机初始对齐
-
+    double lastPlayerTick, lastOrbitTick;
+    const void *playerCamera;
+    uintptr_t playerTarget;
+    double pendingYaw, pendingPitch;
+    float currentYaw, currentPitch, targetDistance;
     CameraConfig config;
 } CameraState;
 
 static pthread_mutex_t cameraLock = PTHREAD_MUTEX_INITIALIZER;
 static CameraState globalCameraState = {
-    .mouseCaptured = false,
-    .isTargetLocked = false,
-    .switchPulseTicks = 0,
-    .switchDirection = 0,
-    .isLockDragKeyDown = false,
-    .lockDragAccumX = 0.0f,
-    .lockHasSwitchedInPress = false,
-    .isGameplayActive = false,
-    .currentYaw = 0.0f,
-    .currentPitch = 0.25f,
-    .targetDistance = DEFAULT_SPRING_ARM_DISTANCE,
-    .hasInitialSync = false,
-    .config = {
-        .mouseSensitivityX = DEFAULT_SENSITIVITY_X,
-        .mouseSensitivityY = DEFAULT_SENSITIVITY_Y,
-        .accelerationFactor = DEFAULT_ACCEL_FACTOR,
-        .decayFactor = 0.0f,
-        .invertY = false,
-        .rawMouseMode = true,
-    }
+    .config = {DEFAULT_SENSITIVITY_X, DEFAULT_SENSITIVITY_Y,
+               DEFAULT_ACCEL_FACTOR, 0, false, true}
 };
 
+// CAM2 deliberately cannot enable the old CAM1 world-space Eye override.
+// The guest invokes this immutable callback synchronously on its camera thread.
 typedef struct {
-    char magic[8];              // "CAM1\0\0\0\0"
-    uint32_t active;            // 1 = 启用 SpringArm 接管, 0 = 原始放行
-    uint32_t reserved;
-    double overrideEyeX;        // 宿主写入
-    double overrideEyeY;
-    double overrideEyeZ;
-    double lookAtX;             // 客体写入
-    double lookAtY;
-    double lookAtZ;
-    double origEyeX;            // 客体写入
-    double origEyeY;
-    double origEyeZ;
-} __attribute__((packed)) ZeldaCameraSharedState;
-_Static_assert(sizeof(ZeldaCameraSharedState) == 0x58, "ZeldaCameraSharedState size must be 0x58");
+    char magic[8];
+    uint32_t version, reserved;
+    uintptr_t callback;
+} ZeldaCameraSharedState;
+_Static_assert(offsetof(ZeldaCameraSharedState, callback) == 0x10, "camera callback ABI");
+_Static_assert(sizeof(ZeldaCameraSharedState) == 0x18, "camera bridge ABI");
 
-static volatile ZeldaCameraSharedState *g_sharedCameraState = NULL;
+static double cameraNow(void) {
+#ifdef UNIT_TEST
+    extern double camera_test_time(void);
+    return camera_test_time();
+#else
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return t.tv_sec + t.tv_nsec * 1e-9;
+#endif
+}
 
-void cameraBindSharedState(void *statePtr) {
+static void cameraDiscardInputLocked(void) {
+    globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
+    globalCameraState.isTargetLocked = false;
+    globalCameraState.switchPulseTicks = 0;
+    globalCameraState.isLockDragKeyDown = false;
+    globalCameraState.lockDragAccumX = 0;
+    globalCameraState.lockHasSwitchedInPress = false;
+}
+
+static bool cameraGameplayActiveLocked(void) {
+    extern bool zelda_is_movie(void);
+    bool active = globalCameraState.isGameplayActive && !zelda_is_movie() &&
+        cameraNow() - globalCameraState.lastPlayerTick <= PLAYER_CAMERA_TIMEOUT;
+    if (!active) cameraDiscardInputLocked();
+    return active;
+}
+
+// v1.4.3 ExecutePlayerCameraChase, BEFORE its requested pose reaches collision.
+// orbit = {native distance, elevation degrees, azimuth degrees}. This is NOT a
+// view matrix and none of these coordinates are copied across host frames.
+static void cameraApplyPlayerOrbit(float *orbit, float *pitchState, const void *component) {
+    if (!component || (!orbit != !pitchState)) return;
+    bool orbitUpdate = orbit != NULL;
+    uint32_t flags;
+    uintptr_t target;
+    memcpy(&flags, (const char *)component + 0x34, sizeof flags);
+    memcpy(&target, (const char *)component + 0xc90, sizeof target);
+    extern bool zelda_is_movie(void);
     pthread_mutex_lock(&cameraLock);
-    if (statePtr) {
-        g_sharedCameraState = (volatile ZeldaCameraSharedState *)statePtr;
-        fprintf(stderr, "[CAMERA_HOOK] Connected to guest shared camera state at %p (magic=%.4s)\n",
-                statePtr, g_sharedCameraState->magic);
-    } else {
-        g_sharedCameraState = NULL;
+    double now = cameraNow();
+    bool valid = target && !(flags & 3) && !zelda_is_movie();
+    if (orbitUpdate) valid = valid && isfinite(orbit[0]) && orbit[0] > 0 && orbit[0] < 500 &&
+        isfinite(orbit[1]) && isfinite(orbit[2]) && isfinite(*pitchState);
+    static int trace = -1;
+    if (trace < 0) trace = getenv("ZELDA_CAMERA_TRACE") != NULL;
+    bool report = trace && (globalCameraState.playerCamera != component ||
+        globalCameraState.isGameplayActive != valid ||
+        globalCameraState.pendingYaw != 0 || globalCameraState.pendingPitch != 0);
+    bool continuous = globalCameraState.isGameplayActive &&
+        globalCameraState.playerCamera == component && globalCameraState.playerTarget == target &&
+        now - globalCameraState.lastPlayerTick <= PLAYER_CAMERA_TIMEOUT;
+    if (!valid || !continuous) cameraDiscardInputLocked();
+    if (!orbitUpdate) {
+        // PreUpdate also runs in lock-on/aim modes. Keep their native buttons
+        // alive, but discard motion if the previous frame never ran Chase.
+        if (globalCameraState.lastOrbitTick < globalCameraState.lastPlayerTick || !valid)
+            globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
+        globalCameraState.isGameplayActive = valid;
+        globalCameraState.lastPlayerTick = now;
+        globalCameraState.playerCamera = component;
+        globalCameraState.playerTarget = target;
+        pthread_mutex_unlock(&cameraLock);
+        return;
     }
+    if (now - globalCameraState.lastOrbitTick > PLAYER_CAMERA_TIMEOUT || globalCameraState.isTargetLocked)
+        globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
+    globalCameraState.lastOrbitTick = now;
+    globalCameraState.isGameplayActive = valid;
+    globalCameraState.lastPlayerTick = now;
+    globalCameraState.playerCamera = component;
+    globalCameraState.playerTarget = target;
+    if (valid) {
+        const double degrees = 180.0 / M_PI;
+        if (globalCameraState.pendingPitch != 0) {
+            float before = orbit[1];
+            double pitch = before + globalCameraState.pendingPitch * degrees;
+            double limit = MAX_PITCH_LIMIT * degrees;
+            orbit[1] = (float)fmax(-limit, fmin(limit, pitch));
+            // Keep the native pitch accumulator aligned for the following frame.
+            *pitchState += orbit[1] - before;
+        }
+        if (globalCameraState.pendingYaw != 0)
+            orbit[2] = (float)remainder(orbit[2] + globalCameraState.pendingYaw * degrees, 360.0);
+        globalCameraState.currentPitch = (float)(orbit[1] / degrees);
+        globalCameraState.currentYaw = (float)(orbit[2] / degrees);
+        globalCameraState.targetDistance = orbit[0];
+    }
+    if (report)
+        fprintf(stderr, "[CAMERA_HOOK] control=%d flags=%#x target=%d orbit=(%.3f,%.3f,%.3f) delta=(%.5f,%.5f)\n",
+                valid, flags, target != 0, orbit[0], orbit[1], orbit[2],
+                globalCameraState.pendingYaw, globalCameraState.pendingPitch);
+    globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
     pthread_mutex_unlock(&cameraLock);
 }
 
-static void cameraUpdateSharedStateLocked(void) {
-    if (!g_sharedCameraState) return;
-    if (memcmp((const void *)g_sharedCameraState->magic, "CAM1", 4) != 0) return;
-
-    double lookX = g_sharedCameraState->lookAtX;
-    double lookY = g_sharedCameraState->lookAtY;
-    double lookZ = g_sharedCameraState->lookAtZ;
-    double origEyeX = g_sharedCameraState->origEyeX;
-    double origEyeY = g_sharedCameraState->origEyeY;
-    double origEyeZ = g_sharedCameraState->origEyeZ;
-
-    // 检查客体坐标是否有效
-    double dx = origEyeX - lookX;
-    double dy = origEyeY - lookY;
-    double dz = origEyeZ - lookZ;
-    double dist = sqrt(dx * dx + dy * dy + dz * dz);
-    bool validGuestCoords = (dist > 0.2 && dist < 500.0 && isfinite(dist) && fabs(lookY) > 0.001);
-
-    bool isMovie = false;
-#ifndef UNIT_TEST
-    extern bool zelda_is_movie(void);
-    isMovie = zelda_is_movie();
-#endif
-
-    if (!globalCameraState.hasInitialSync && validGuestCoords) {
-        globalCameraState.currentYaw = (float)atan2(dx, dz);
-        while (globalCameraState.currentYaw < 0.0f) globalCameraState.currentYaw += 2.0f * (float)M_PI;
-        double sinP = dy / dist;
-        if (sinP > 0.99) sinP = 0.99;
-        if (sinP < -0.99) sinP = -0.99;
-        globalCameraState.currentPitch = (float)asin(sinP);
-        globalCameraState.targetDistance = (float)dist;
-        globalCameraState.hasInitialSync = true;
+bool cameraBindSharedState(void *statePtr) {
+    if (!statePtr) return false;
+    ZeldaCameraSharedState *state = statePtr;
+    if (memcmp(state->magic, "CAM2\0\0\0\0", 8) || state->version != 2) {
+        fprintf(stderr, "[CAMERA_HOOK] incompatible bridge; rebuild patched modules\n");
+        return false;
     }
-
-    if (globalCameraState.mouseCaptured && globalCameraState.isGameplayActive && validGuestCoords && !isMovie) {
-        float effectiveDist = globalCameraState.targetDistance;
-        float yaw = globalCameraState.currentYaw;
-        float pitch = globalCameraState.currentPitch;
-        float cosPitch = cosf(pitch);
-
-        double newEyeX = lookX + (double)(effectiveDist * cosPitch * sinf(yaw));
-        double newEyeY = lookY + (double)(effectiveDist * sinf(pitch));
-        double newEyeZ = lookZ + (double)(effectiveDist * cosPitch * cosf(yaw));
-
-        if (isfinite(newEyeX) && isfinite(newEyeY) && isfinite(newEyeZ)) {
-            g_sharedCameraState->overrideEyeX = newEyeX;
-            g_sharedCameraState->overrideEyeY = newEyeY;
-            g_sharedCameraState->overrideEyeZ = newEyeZ;
-            g_sharedCameraState->active = 1; // 激活客体改写
-        } else {
-            g_sharedCameraState->active = 0;
-        }
-    } else {
-        // 未捕获或非游玩状态或过场动画：静默跟踪客体，并将 active 设为 0 放行原版
-        g_sharedCameraState->active = 0;
-        if (validGuestCoords) {
-            globalCameraState.currentYaw = (float)atan2(dx, dz);
-            while (globalCameraState.currentYaw < 0.0f) globalCameraState.currentYaw += 2.0f * (float)M_PI;
-            double sinP = dy / dist;
-            if (sinP > 0.99) sinP = 0.99;
-            if (sinP < -0.99) sinP = -0.99;
-            globalCameraState.currentPitch = (float)asin(sinP);
-        }
-    }
+    __atomic_store_n(&state->callback, (uintptr_t)cameraApplyPlayerOrbit, __ATOMIC_RELEASE);
+    return true;
 }
 
 void cameraFrameSync(void) {
-    if (!g_sharedCameraState) return;
     pthread_mutex_lock(&cameraLock);
-    cameraUpdateSharedStateLocked();
+    (void)cameraGameplayActiveLocked();
     pthread_mutex_unlock(&cameraLock);
 }
 
 void cameraInit(void) {
     pthread_mutex_lock(&cameraLock);
-    globalCameraState.mouseCaptured = false;
-    globalCameraState.isTargetLocked = false;
-    globalCameraState.switchPulseTicks = 0;
-    globalCameraState.switchDirection = 0;
-    globalCameraState.isLockDragKeyDown = false;
-    globalCameraState.lockDragAccumX = 0.0f;
-    globalCameraState.lockHasSwitchedInPress = false;
-    globalCameraState.isGameplayActive = false;
-    globalCameraState.currentYaw = 0.0f;
-    globalCameraState.currentPitch = 0.25f;
-    globalCameraState.targetDistance = DEFAULT_SPRING_ARM_DISTANCE;
-    globalCameraState.hasInitialSync = false;
+    CameraConfig config = globalCameraState.config;
+    globalCameraState = (CameraState){.config = config};
     pthread_mutex_unlock(&cameraLock);
 }
 
 void cameraReset(void) {
     pthread_mutex_lock(&cameraLock);
-    globalCameraState.switchPulseTicks = 0;
-    globalCameraState.switchDirection = 0;
-    globalCameraState.hasInitialSync = false;
+    cameraDiscardInputLocked();
     pthread_mutex_unlock(&cameraLock);
+}
+
+static void cameraAccumulateLocked(float deltaX, float deltaY) {
+    double accel = 1;
+    if (!globalCameraState.config.rawMouseMode)
+        accel += globalCameraState.config.accelerationFactor * hypot((double)deltaX, deltaY);
+    // Positive X looks right (camera orbits left); positive Y looks down.
+    double yaw = -deltaX * globalCameraState.config.mouseSensitivityX * accel * ANGLE_RADIAN_SCALE;
+    double pitch = deltaY * globalCameraState.config.mouseSensitivityY * accel * ANGLE_RADIAN_SCALE;
+    if (globalCameraState.config.invertY) pitch = -pitch;
+    if (isfinite(yaw) && isfinite(pitch)) {
+        globalCameraState.pendingYaw = remainder(globalCameraState.pendingYaw + yaw, 2 * M_PI);
+        globalCameraState.pendingPitch = fmax(-M_PI, fmin(M_PI, globalCameraState.pendingPitch + pitch));
+    }
 }
 
 void cameraAddMouseDelta(float deltaX, float deltaY) {
     if (!isfinite(deltaX) || !isfinite(deltaY)) return;
-
     pthread_mutex_lock(&cameraLock);
-    if (globalCameraState.mouseCaptured) {
-        float speed = hypotf(deltaX, deltaY);
-        float accel = 1.0f;
-        if (!globalCameraState.config.rawMouseMode) {
-            accel = 1.0f + globalCameraState.config.accelerationFactor * speed;
-        }
-
-        // 统一物理朝向：macOS 向上推鼠标 deltaY < 0，校准为抬头 (pitch 增加)
-        float correctedY = -deltaY;
-        if (globalCameraState.config.invertY) {
-            correctedY = -correctedY;
-        }
-
-        float scaledX = deltaX * globalCameraState.config.mouseSensitivityX * accel;
-        float scaledY = correctedY * globalCameraState.config.mouseSensitivityY * accel;
-
-        // 方案 A 直接驱动：鼠标移动瞬间累加弧度，无蓄水池，无排队滞后！
-        float dYaw = scaledX * ANGLE_RADIAN_SCALE;
-        float dPitch = scaledY * ANGLE_RADIAN_SCALE;
-
-        globalCameraState.currentYaw += dYaw;
-        while (globalCameraState.currentYaw >= 2.0f * (float)M_PI) globalCameraState.currentYaw -= 2.0f * (float)M_PI;
-        while (globalCameraState.currentYaw < 0.0f) globalCameraState.currentYaw += 2.0f * (float)M_PI;
-
-        globalCameraState.currentPitch += dPitch;
-        if (globalCameraState.currentPitch > MAX_PITCH_LIMIT) globalCameraState.currentPitch = MAX_PITCH_LIMIT;
-        if (globalCameraState.currentPitch < MIN_PITCH_LIMIT) globalCameraState.currentPitch = MIN_PITCH_LIMIT;
-
-        // 长按锁定键期间横向位移切怪检测
+    if (globalCameraState.mouseCaptured && cameraGameplayActiveLocked()) {
         if (globalCameraState.isLockDragKeyDown) {
             globalCameraState.lockDragAccumX += deltaX;
-            if (globalCameraState.lockDragAccumX >= SWITCH_DRAG_THRESHOLD) {
+            if (fabsf(globalCameraState.lockDragAccumX) >= SWITCH_DRAG_THRESHOLD) {
                 globalCameraState.switchPulseTicks = SWITCH_PULSE_DURATION;
-                globalCameraState.switchDirection = 1;
+                globalCameraState.switchDirection = globalCameraState.lockDragAccumX > 0 ? 1 : -1;
                 globalCameraState.lockHasSwitchedInPress = true;
-                globalCameraState.lockDragAccumX = 0.0f;
-                globalCameraState.isTargetLocked = true;
-            } else if (globalCameraState.lockDragAccumX <= -SWITCH_DRAG_THRESHOLD) {
-                globalCameraState.switchPulseTicks = SWITCH_PULSE_DURATION;
-                globalCameraState.switchDirection = -1;
-                globalCameraState.lockHasSwitchedInPress = true;
-                globalCameraState.lockDragAccumX = 0.0f;
+                globalCameraState.lockDragAccumX = 0;
                 globalCameraState.isTargetLocked = true;
             }
+        } else if (!globalCameraState.isTargetLocked) {
+            cameraAccumulateLocked(deltaX, deltaY);
         }
-        cameraUpdateSharedStateLocked();
     }
     pthread_mutex_unlock(&cameraLock);
 }
 
 void cameraAddTouchDelta(float deltaX, float deltaY) {
     if (!isfinite(deltaX) || !isfinite(deltaY)) return;
-
     pthread_mutex_lock(&cameraLock);
-    float speed = hypotf(deltaX, deltaY);
-    float accel = 1.0f + (globalCameraState.config.accelerationFactor * 0.5f) * speed;
-    float correctedY = -deltaY;
-    if (globalCameraState.config.invertY) {
-        correctedY = -correctedY;
-    }
-
-    float scaledX = deltaX * globalCameraState.config.mouseSensitivityX * accel;
-    float scaledY = correctedY * globalCameraState.config.mouseSensitivityY * accel;
-
-    // 移动端划屏直接驱动极坐标
-    float dYaw = scaledX * ANGLE_RADIAN_SCALE;
-    float dPitch = scaledY * ANGLE_RADIAN_SCALE;
-
-    globalCameraState.currentYaw += dYaw;
-    while (globalCameraState.currentYaw >= 2.0f * (float)M_PI) globalCameraState.currentYaw -= 2.0f * (float)M_PI;
-    while (globalCameraState.currentYaw < 0.0f) globalCameraState.currentYaw += 2.0f * (float)M_PI;
-
-    globalCameraState.currentPitch += dPitch;
-    if (globalCameraState.currentPitch > MAX_PITCH_LIMIT) globalCameraState.currentPitch = MAX_PITCH_LIMIT;
-    if (globalCameraState.currentPitch < MIN_PITCH_LIMIT) globalCameraState.currentPitch = MIN_PITCH_LIMIT;
-
+    if (cameraGameplayActiveLocked() && !globalCameraState.isTargetLocked)
+        cameraAccumulateLocked(deltaX, deltaY);
     pthread_mutex_unlock(&cameraLock);
 }
 
-void cameraUpdateSpringArm(double *ioEyeX, double *ioEyeY, double *ioEyeZ,
-                           double lookAtX, double lookAtY, double lookAtZ,
-                           float collisionDistance) {
-    if (!ioEyeX || !ioEyeY || !ioEyeZ) return;
-
+void cameraGetAngles(float *yaw, float *pitch, float *distance) {
     pthread_mutex_lock(&cameraLock);
-
-    // 首次调用或重置初值：从客体现有的真实 Eye 与 LookAt 反求当前 Yaw/Pitch
-    if (!globalCameraState.hasInitialSync) {
-        double dx = *ioEyeX - lookAtX;
-        double dy = *ioEyeY - lookAtY;
-        double dz = *ioEyeZ - lookAtZ;
-        double dist = sqrt(dx * dx + dy * dy + dz * dz);
-        if (dist > 0.1 && isfinite(dist)) {
-            globalCameraState.currentYaw = (float)atan2(dx, dz);
-            while (globalCameraState.currentYaw < 0.0f) globalCameraState.currentYaw += 2.0f * (float)M_PI;
-            double sinPitch = dy / dist;
-            if (sinPitch > 0.99) sinPitch = 0.99;
-            if (sinPitch < -0.99) sinPitch = -0.99;
-            globalCameraState.currentPitch = (float)asin(sinPitch);
-            globalCameraState.targetDistance = (float)dist;
-            globalCameraState.hasInitialSync = true;
-        }
-    }
-
-    if (globalCameraState.mouseCaptured && globalCameraState.hasInitialSync) {
-        float effectiveDist = globalCameraState.targetDistance;
-        // 原生碰撞避障联动：若碰到障碍物自动收缩臂长防穿墙
-        if (collisionDistance > 0.1f && collisionDistance < effectiveDist) {
-            effectiveDist = collisionDistance;
-        }
-
-        float yaw = globalCameraState.currentYaw;
-        float pitch = globalCameraState.currentPitch;
-        float cosPitch = cosf(pitch);
-
-        double newEyeX = lookAtX + (double)(effectiveDist * cosPitch * sinf(yaw));
-        double newEyeY = lookAtY + (double)(effectiveDist * sinf(pitch));
-        double newEyeZ = lookAtZ + (double)(effectiveDist * cosPitch * cosf(yaw));
-
-        if (isfinite(newEyeX) && isfinite(newEyeY) && isfinite(newEyeZ)) {
-            *ioEyeX = newEyeX;
-            *ioEyeY = newEyeY;
-            *ioEyeZ = newEyeZ;
-        }
-    } else {
-        // 未捕获光标时持续静默跟踪游戏原生朝向，下一次捕获时绝不发生镜头突兀跳变
-        double dx = *ioEyeX - lookAtX;
-        double dy = *ioEyeY - lookAtY;
-        double dz = *ioEyeZ - lookAtZ;
-        double dist = sqrt(dx * dx + dy * dy + dz * dz);
-        if (dist > 0.1 && isfinite(dist)) {
-            globalCameraState.currentYaw = (float)atan2(dx, dz);
-            while (globalCameraState.currentYaw < 0.0f) globalCameraState.currentYaw += 2.0f * (float)M_PI;
-            double sinPitch = dy / dist;
-            if (sinPitch > 0.99) sinPitch = 0.99;
-            if (sinPitch < -0.99) sinPitch = -0.99;
-            globalCameraState.currentPitch = (float)asin(sinPitch);
-        }
-    }
-
-    pthread_mutex_unlock(&cameraLock);
-}
-
-void cameraGetAngles(float *outYaw, float *outPitch, float *outDistance) {
-    pthread_mutex_lock(&cameraLock);
-    if (outYaw) *outYaw = globalCameraState.currentYaw;
-    if (outPitch) *outPitch = globalCameraState.currentPitch;
-    if (outDistance) *outDistance = globalCameraState.targetDistance;
-    pthread_mutex_unlock(&cameraLock);
-}
-
-void cameraSetAngles(float yaw, float pitch, float distance) {
-    pthread_mutex_lock(&cameraLock);
-    globalCameraState.currentYaw = yaw;
-    while (globalCameraState.currentYaw >= 2.0f * (float)M_PI) globalCameraState.currentYaw -= 2.0f * (float)M_PI;
-    while (globalCameraState.currentYaw < 0.0f) globalCameraState.currentYaw += 2.0f * (float)M_PI;
-
-    globalCameraState.currentPitch = pitch;
-    if (globalCameraState.currentPitch > MAX_PITCH_LIMIT) globalCameraState.currentPitch = MAX_PITCH_LIMIT;
-    if (globalCameraState.currentPitch < MIN_PITCH_LIMIT) globalCameraState.currentPitch = MIN_PITCH_LIMIT;
-
-    if (distance >= MIN_SPRING_ARM_DISTANCE && distance <= MAX_SPRING_ARM_DISTANCE) {
-        globalCameraState.targetDistance = distance;
-    }
-    globalCameraState.hasInitialSync = true;
-    pthread_mutex_unlock(&cameraLock);
-}
-
-void cameraAddZoom(float deltaZoom) {
-    pthread_mutex_lock(&cameraLock);
-    globalCameraState.targetDistance += deltaZoom;
-    if (globalCameraState.targetDistance < MIN_SPRING_ARM_DISTANCE) {
-        globalCameraState.targetDistance = MIN_SPRING_ARM_DISTANCE;
-    }
-    if (globalCameraState.targetDistance > MAX_SPRING_ARM_DISTANCE) {
-        globalCameraState.targetDistance = MAX_SPRING_ARM_DISTANCE;
-    }
-    cameraUpdateSharedStateLocked();
-    pthread_mutex_unlock(&cameraLock);
-}
-
-void cameraRequestInitialSync(void) {
-    pthread_mutex_lock(&cameraLock);
-    globalCameraState.hasInitialSync = false;
+    if (yaw) *yaw = globalCameraState.currentYaw;
+    if (pitch) *pitch = globalCameraState.currentPitch;
+    if (distance) *distance = globalCameraState.targetDistance;
     pthread_mutex_unlock(&cameraLock);
 }
 
 bool cameraPoll(int32_t *outRx, int32_t *outRy) {
     if (!outRx || !outRy) return false;
-
     pthread_mutex_lock(&cameraLock);
-
-    // 方案 A 模式：手柄右摇杆彻底断开，保持绝对为 0，杜绝摇杆与 SpringArm 竞争！
-    *outRx = 0;
-    *outRy = 0;
-
-    // 仅在切怪脉冲触发时输出切怪瞬时脉冲
-    if (globalCameraState.switchPulseTicks > 0) {
+    *outRx = *outRy = 0;
+    bool pulse = cameraGameplayActiveLocked() && globalCameraState.switchPulseTicks > 0;
+    if (pulse) {
         int ticks = globalCameraState.switchPulseTicks--;
-        int dir = globalCameraState.switchDirection;
-        if (ticks == SWITCH_PULSE_DURATION) {
-            *outRx = dir * 32767;
-        } else if (ticks == 2) {
-            *outRx = dir * 20000;
-        }
-        pthread_mutex_unlock(&cameraLock);
-        return true;
+        if (ticks == SWITCH_PULSE_DURATION) *outRx = globalCameraState.switchDirection * 32767;
+        else if (ticks == 2) *outRx = globalCameraState.switchDirection * 20000;
     }
-
     pthread_mutex_unlock(&cameraLock);
-    return false;
+    return pulse;
 }
 
 void cameraSetMouseCaptured(bool captured) {
     pthread_mutex_lock(&cameraLock);
     globalCameraState.mouseCaptured = captured;
+    globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
     pthread_mutex_unlock(&cameraLock);
 }
 
@@ -425,17 +254,20 @@ bool cameraIsMouseCaptured(void) {
 void cameraToggleMouseCapture(void) {
     pthread_mutex_lock(&cameraLock);
     globalCameraState.mouseCaptured = !globalCameraState.mouseCaptured;
+    globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
     pthread_mutex_unlock(&cameraLock);
 }
 
 void cameraToggleTargetLock(void) {
     pthread_mutex_lock(&cameraLock);
+    if (!cameraGameplayActiveLocked()) { pthread_mutex_unlock(&cameraLock); return; }
     globalCameraState.isTargetLocked = !globalCameraState.isTargetLocked;
     pthread_mutex_unlock(&cameraLock);
 }
 
 void cameraSetTargetLock(bool locked) {
     pthread_mutex_lock(&cameraLock);
+    if (!cameraGameplayActiveLocked()) { pthread_mutex_unlock(&cameraLock); return; }
     globalCameraState.isTargetLocked = locked;
     pthread_mutex_unlock(&cameraLock);
 }
@@ -449,6 +281,7 @@ bool cameraIsTargetLocked(void) {
 
 void cameraSwitchTarget(int direction) {
     pthread_mutex_lock(&cameraLock);
+    if (!cameraGameplayActiveLocked()) { pthread_mutex_unlock(&cameraLock); return; }
     globalCameraState.switchPulseTicks = SWITCH_PULSE_DURATION;
     globalCameraState.switchDirection = (direction >= 0) ? 1 : -1;
     pthread_mutex_unlock(&cameraLock);
@@ -456,6 +289,7 @@ void cameraSwitchTarget(int direction) {
 
 void cameraHandleLockDragButton(bool pressed) {
     pthread_mutex_lock(&cameraLock);
+    if (!cameraGameplayActiveLocked()) { pthread_mutex_unlock(&cameraLock); return; }
     if (pressed) {
         globalCameraState.isLockDragKeyDown = true;
         globalCameraState.lockDragAccumX = 0.0f;
@@ -467,13 +301,13 @@ void cameraHandleLockDragButton(bool pressed) {
                 globalCameraState.isTargetLocked = !globalCameraState.isTargetLocked;
             }
         }
-        cameraUpdateSharedStateLocked();
     }
     pthread_mutex_unlock(&cameraLock);
 }
 
 void cameraFeedMouseMovementForTargetSwitch(float deltaX) {
     pthread_mutex_lock(&cameraLock);
+    if (!cameraGameplayActiveLocked()) { pthread_mutex_unlock(&cameraLock); return; }
     if (globalCameraState.isLockDragKeyDown) {
         globalCameraState.lockDragAccumX += deltaX;
         if (globalCameraState.lockDragAccumX >= SWITCH_DRAG_THRESHOLD) {
@@ -489,7 +323,6 @@ void cameraFeedMouseMovementForTargetSwitch(float deltaX) {
             globalCameraState.lockDragAccumX = 0.0f;
             globalCameraState.isTargetLocked = true;
         }
-        cameraUpdateSharedStateLocked();
     }
     pthread_mutex_unlock(&cameraLock);
 }
@@ -497,13 +330,13 @@ void cameraFeedMouseMovementForTargetSwitch(float deltaX) {
 uint64_t cameraGetTargetLockButtons(void) {
     pthread_mutex_lock(&cameraLock);
     uint64_t btn = 0;
+    (void)cameraGameplayActiveLocked();
     if (globalCameraState.isTargetLocked) {
         if (globalCameraState.switchPulseTicks == SWITCH_PULSE_DURATION) {
             btn = 0;
         } else {
             btn = ZL_BUTTON_MASK;
         }
-        cameraUpdateSharedStateLocked();
     }
     pthread_mutex_unlock(&cameraLock);
     return btn;
@@ -519,33 +352,29 @@ CameraConfig cameraGetConfig(void) {
 void cameraSetConfig(const CameraConfig *newConfig) {
     if (!newConfig) return;
     pthread_mutex_lock(&cameraLock);
-    globalCameraState.config = *newConfig;
+    if (isfinite(newConfig->mouseSensitivityX) && newConfig->mouseSensitivityX >= 0 && newConfig->mouseSensitivityX <= 100 &&
+        isfinite(newConfig->mouseSensitivityY) && newConfig->mouseSensitivityY >= 0 && newConfig->mouseSensitivityY <= 100 &&
+        isfinite(newConfig->accelerationFactor) && newConfig->accelerationFactor >= 0 && newConfig->accelerationFactor <= 1)
+        globalCameraState.config = *newConfig;
     pthread_mutex_unlock(&cameraLock);
 }
 
 void cameraSetGameplayActive(bool active) {
     pthread_mutex_lock(&cameraLock);
     globalCameraState.isGameplayActive = active;
-    if (!active) {
-        globalCameraState.mouseCaptured = false;
-        globalCameraState.isLockDragKeyDown = false;
-        globalCameraState.hasInitialSync = false;
-    }
+    globalCameraState.lastPlayerTick = cameraNow();
+    if (!active) cameraDiscardInputLocked();
     pthread_mutex_unlock(&cameraLock);
 }
 
 bool cameraIsGameplayActive(void) {
     pthread_mutex_lock(&cameraLock);
-    bool active = globalCameraState.isGameplayActive;
+    bool active = cameraGameplayActiveLocked();
     pthread_mutex_unlock(&cameraLock);
     return active;
 }
 
-void cameraNoteGamepadActivity(void) {
-    pthread_mutex_lock(&cameraLock);
-    globalCameraState.hasInitialSync = false;
-    pthread_mutex_unlock(&cameraLock);
-}
+void cameraNoteGamepadActivity(void) { cameraReset(); }
 
 static time_t lastConfigMtime = 0;
 

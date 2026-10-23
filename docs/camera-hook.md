@@ -1,0 +1,40 @@
+# v1.4.3 相机接入依据
+
+## 来源与核对方式
+
+起点是本地 `nx-optimizer/src/PatchInfo/Tears Of The Kingdom/UltraCam/exefs/subsdk3` 的 CameraControl / CameraControlFix / CameraFunc 字符串和特征码。它们分别指向当前游戏的通用矩阵构建路径、该路径所在更新函数，以及 SEAD 的相机辅助计算。不能因为宿主函数叫 SpringArm 就推断已经进入原生碰撞流程。
+
+函数名称参考公开的 [dt-12345/totk_syms](https://github.com/dt-12345/totk_syms)。该表面向 **1.2.1**，这里只用名称帮助辨认结构；所有实际地址都重新在本地 **1.4.3** 中定位，未直接套用旧偏移。
+
+通过 ExecutePlayerCameraChase 的 getName 字符串交叉引用找到虚函数表，再从 0x120 槽追踪到实际追踪相机代码。PlayerCameraPreUpdate 同样由其 getName、虚函数表及组件调用链确认。
+
+## 原实现的问题
+
+`main+0x62883c` 在通用矩阵计算中。那里 `d1/d2/d0` 是 Eye 的 X/Y/Z，`d3/d4/d5` 是目标的 X/Y/Z；旧代码把它们错当成 `d0/d1/d2` 和 `d5/d3/d4`。并且在到达旧 hook 之前，一部分 Eye/目标数据已写回相机对象。宿主显示线程异步写入另一帧的绝对 Eye 会导致同帧数据不一致，也会覆盖原生相机的输出。
+
+原来的 `cameraUpdateSpringArm(..., collisionDistance)` 只在单元测试调用，实际运行的 CAM1 hook 没有从游戏获取碰撞距离，因此测试通过不能证明运行时会避障。`zelda_game_seconds()` 是帧步进累计计时，标题界面也增长，不适合判断已读档。滚动事件则直接调用了缩放接口。
+
+## 当前接入
+
+Build ID：`277178b7dba1b6d4949a84778d4abc58`。
+
+| 位置 | 作用 |
+| --- | --- |
+| `0x3790f58` | ExecutePlayerCameraChase 虚函数表 |
+| `0x3791078` | 该表 0x120 槽，指向 `0x18e414` |
+| `0x18f100` | 新角度 hook：原生 Chase 即将从本帧极坐标生成请求位置 |
+| 原 SP `+0x40/+0x44/+0x48` | 原生距离、俯仰角、水平角；角度单位为度 |
+| `x20+0x108` | Chase 的原生俯仰累积值，注入时同步实际俯仰变化量 |
+| `0x18f170` 附近 | 原生代码把计算结果写到状态 `+0x338/+0x344` 请求位置/目标 |
+| `0x8749e8` | PlayerCameraPreUpdate 已调用组件 preUpdate、即将继续处理输入的位置；仅观察生命周期 |
+| `x19+0x34` / `x19+0xc90` | PlayerCamera 当前状态位和本帧目标；拒绝禁用位、空目标 |
+| `0x2248a98` | 单独的 ExecuteCameraCalcGameCameraCollision 路径，未修改 |
+| `0x3ae4040` | CAM2 回调页，ABI 版本 2，宿主回调指针在 `+0x10` |
+
+角度只在客体游戏线程的同步回调中修改，距离、目标和后续原生相机流程保持由游戏计算。PreUpdate 观察与 Chase 注入分开，防止锁敌相机切走后误判成离开游戏并释放 ZL；其他分支未消费的位移会被丢弃。
+
+两个跳板保存调用方 GPR、LR、全部 SIMD、NZCV、FPCR、FPSR，不使用 Apple 保留的 x18；执行原指令后返回原函数。修改只发生在校验后的离线镜像，运行时不改代码。CAM1 不被兼容启用。
+
+## 验证边界
+
+已自动验证生成跳板的 ABI、状态门禁、输入消费以及可执行文件构建/加载；不以这些测试宣称实机碰撞已经在全部场景验收。普通 Chase 以外的瞄准、攀爬、骑乘等分支尚未接入角度增量，保留原生行为。实际穿模、跟随手感、剧情镜头与模式切换由实机测试确认。

@@ -24,7 +24,7 @@
       "height": 56.0,
       "mapped_button": "B",
       "visible_event": "always",
-      "highlight_event": "always"
+      "highlight_event": "none"
     },
     {
       "id": "jump_x",
@@ -36,16 +36,16 @@
       "height": 52.0,
       "mapped_button": "X",
       "visible_event": "always",
-      "highlight_event": "always"
+      "highlight_event": "none"
     },
     {
       "id": "interact_a",
-      "title": "✋ 拾取",
+      "title": "操作",
       "anchor": "bottomRight",
       "offset_x": -170.0,
       "offset_y": -145.0,
-      "width": 50.0,
-      "height": 50.0,
+      "width": 104.0,
+      "height": 54.0,
       "mapped_button": "A",
       "visible_event": "always",
       "highlight_event": "interact"
@@ -60,7 +60,7 @@
       "height": 48.0,
       "mapped_button": "ZR",
       "visible_event": "always",
-      "highlight_event": "always"
+      "highlight_event": "none"
     },
     {
       "id": "target_lock_zl",
@@ -84,7 +84,7 @@
       "height": 38.0,
       "mapped_button": "SWITCH",
       "visible_event": "always",
-      "highlight_event": "always"
+      "highlight_event": "none"
     },
     {
       "id": "glider_x",

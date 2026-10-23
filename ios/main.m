@@ -3,11 +3,14 @@
 #import <QuartzCore/CAMetalLayer.h>
 #import <AVFAudio/AVFAudio.h>
 #import <GameController/GameController.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <mach/mach.h>
 #include <os/proc.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "cloud_save_sync.h"
+#include "filesystem.h"
 #include "dm.h"
 #include "kernel.h"
 #include "input.h"
@@ -26,6 +29,7 @@
 #include "screen_aspect.inc"
 #include "action_file_watcher.h"
 #include "action_file_watcher.inc"
+#include "native_prompt_overlay.inc"
 
 #ifndef MTLGPUFamilyMetal4
 #define MTLGPUFamilyMetal4 ((MTLGPUFamily)5002)
@@ -38,6 +42,8 @@ static CAMetalLayer *metal_layer;
 static UILabel *status_label, *performance_label;
 static UIStackView *performance_panel;
 static UIButton *performance_toggle;
+static UIButton *cloudCancelButton;
+static UIButton *cloudFolderButton;
 static BOOL performance_expanded = YES;
 static ZeldaCPUUsage cpu_usage;
 static BOOL launched, guest_running;
@@ -46,6 +52,25 @@ static pthread_mutex_t vsync_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void (*resource_report)(uint32_t, const char *);
 static NSString *documents;
 static GCVirtualController *touch_controller;
+
+static void connect_touch_controller(void) {
+    if (touch_controller) return;
+    GCVirtualControllerConfiguration *config = [GCVirtualControllerConfiguration new];
+    config.elements = [NSSet setWithObject:GCInputLeftThumbstick];
+    touch_controller = [[GCVirtualController alloc] initWithConfiguration:config];
+    [touch_controller connectWithReplyHandler:^(NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (error) { fprintf(stderr, "TOUCH controller failed code=%ld\n", (long)error.code); return; }
+            GCController *controller = touch_controller.controller;
+            gamepad_set_virtual_controller((__bridge void *)controller);
+            // The on-screen stick remains a virtual stick. Route it as touch
+            // input rather than resetting the camera as physical-pad activity.
+            controller.extendedGamepad.leftThumbstick.valueChangedHandler = ^(GCControllerDirectionPad *pad, float x, float y) {
+                (void)pad; inputTouchStick(x, y);
+            };
+        });
+    }];
+}
 
 static double physical_gib(void) {
     task_vm_info_data_t info={0};mach_msg_type_number_t count=TASK_VM_INFO_COUNT;
@@ -72,6 +97,22 @@ static void status(NSString *text) {
 }
 
 void front_run(void (*guest)(void)) {
+    if (cloudSaveSyncIsConfigured()) {
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            cloudCancelButton.hidden = NO;
+            cloudCancelButton.enabled = YES;
+        });
+        status(@"Syncing cloud saves…\nTap Cancel to skip.");
+        CloudSaveSyncStatus syncStatus = cloudSaveSyncPullBlocking(CLOUD_SAVE_TIMEOUT_SECONDS, ^(NSString *text) {
+            status([NSString stringWithFormat:@"%@\nTap Cancel to skip.", text]);
+        });
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            cloudCancelButton.hidden = YES;
+        });
+        if (syncStatus == CloudSaveSyncStatusConflict)
+            NSLog(@"CLOUD_SYNC conflict: keeping local save; cloud remains unchanged");
+    }
+
     NSString *directory = [[documents stringByAppendingPathComponent:@"work/shaders"]
         stringByAppendingPathComponent:@"b-" DMSH_CHAIN];
     CFAbsoluteTime began = CFAbsoluteTimeGetCurrent();
@@ -84,19 +125,13 @@ void front_run(void (*guest)(void)) {
     fprintf(stderr, "SHADER_PREP end failed=%u seconds=%.3f\n", failed, CFAbsoluteTimeGetCurrent() - began);
     dispatch_sync(dispatch_get_main_queue(), ^{
         status_label.hidden = YES; guest_running = YES;
+        cloudCancelButton.hidden = YES;
+        cloudFolderButton.hidden = YES;
         for (UIView *view in status_label.superview.subviews) if ([view isKindOfClass:UIButton.class]) {
             view.hidden=view.tag==0;((UIButton *)view).enabled=view.tag!=0;
         }
         gamepad_start(); gamepad_vibration_mode(zelda_settings().vibration);
-        if (!GCController.controllers.count) {
-            GCVirtualControllerConfiguration *config = [GCVirtualControllerConfiguration new];
-            // 左下角保留原生虚拟摇杆负责移动；右侧动作键完全由 Unity 锚点原生布局接管
-            config.elements = [NSSet setWithArray:@[GCInputLeftThumbstick]];
-            touch_controller = [[GCVirtualController alloc] initWithConfiguration:config];
-            [touch_controller connectWithReplyHandler:^(NSError *error) {
-                if (error) fprintf(stderr, "TOUCH controller failed code=%ld\n", (long)error.code);
-            }];
-        }
+        connect_touch_controller();
     });
     guest();
 }
@@ -143,6 +178,10 @@ static void start_game(void) {
     for (NSString *key in @[@"work", @"work/save", @"work/logs", @"work/tmp", @"work/shaders/source", @"work/shaders/variants"]) {
         if (![fm createDirectoryAtPath:[documents stringByAppendingPathComponent:key] withIntermediateDirectories:YES attributes:nil error:nil]) abort();
     }
+    cloudSaveSyncInit([documents stringByAppendingPathComponent:@"work/save"]);
+    cloudSaveSyncSetSnapshotProvider(^BOOL(NSString *destination) {
+        return filesystem_snapshot_save(destination.fileSystemRepresentation) == 0;
+    });
     setenv("ZELDA_ROMFS", romfs.fileSystemRepresentation, 1);
     setenv("ZELDA_SHARED_FONT", [[NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"shared.ttf"] fileSystemRepresentation], 1);
     setenv("ZELDA_SETTINGS", [[documents stringByAppendingPathComponent:@"work/settings.json"] fileSystemRepresentation], 1);
@@ -176,11 +215,14 @@ static void start_game(void) {
 }
 @end
 
-@interface ZeldaController : UIViewController
+@interface ZeldaController : UIViewController <UIGestureRecognizerDelegate, UIDocumentPickerDelegate>
 @property (nonatomic, strong) CADisplayLink *displayLink;
 @property (nonatomic, strong) NSTimer *monitor;
 @property (nonatomic, assign) BOOL isPanTracking;
 @property (nonatomic, strong) NSMutableArray<UIButton *> *dynamicActionButtons;
+@property (nonatomic, strong) NSMutableDictionary<NSNumber *, NSNumber *> *pressedActionButtons;
+@property (nonatomic, strong) ZeldaNativePromptView *nativePrompts;
+- (void)releaseAllActionButtons;
 @end
 @implementation ZeldaController
 - (void)loadView {
@@ -238,17 +280,54 @@ static void start_game(void) {
             [button.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-12.0-70.0*i],
             [button.widthAnchor constraintEqualToConstant:60],[button.heightAnchor constraintEqualToConstant:40]]];
     }
+    cloudCancelButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [cloudCancelButton setTitle:@"Cancel Sync" forState:UIControlStateNormal];
+    cloudCancelButton.backgroundColor = [[UIColor redColor] colorWithAlphaComponent:0.75];
+    [cloudCancelButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    cloudCancelButton.layer.cornerRadius = 8;
+    cloudCancelButton.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    cloudCancelButton.translatesAutoresizingMaskIntoConstraints = NO;
+    cloudCancelButton.hidden = YES;
+    [cloudCancelButton addTarget:self action:@selector(cancelCloudSyncAction:) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:cloudCancelButton];
+
+    cloudFolderButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [cloudFolderButton setTitle:cloudSaveSyncIsConfigured() ? @"Cloud: Linked" : @"Link Cloud Folder" forState:UIControlStateNormal];
+    cloudFolderButton.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.65];
+    [cloudFolderButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    cloudFolderButton.layer.cornerRadius = 8;
+    cloudFolderButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    cloudFolderButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [cloudFolderButton addTarget:self action:@selector(pickCloudFolderAction:) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:cloudFolderButton];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [cloudCancelButton.topAnchor constraintEqualToAnchor:status_label.bottomAnchor constant:18],
+        [cloudCancelButton.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [cloudCancelButton.widthAnchor constraintEqualToConstant:150],
+        [cloudCancelButton.heightAnchor constraintEqualToConstant:40],
+        [cloudFolderButton.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8],
+        [cloudFolderButton.leadingAnchor constraintEqualToAnchor:performance_panel.trailingAnchor constant:12],
+        [cloudFolderButton.heightAnchor constraintEqualToConstant:40],
+        [cloudFolderButton.widthAnchor constraintGreaterThanOrEqualToConstant:110]
+    ]];
     CGSize screenSize = UIScreen.mainScreen.bounds.size;
     DeviceAspectClass dAspect = screenClassifyAspect(screenSize.width, screenSize.height);
     fprintf(stderr, "IOS_DEVICE_ASPECT width=%.0f height=%.0f aspect_class=%d\n", screenSize.width, screenSize.height, (int)dAspect);
 
     // 初始化 Unity 风格手柄按键与手游级动态布局
     actionLayoutInit();
+    inputNoteDevice(INPUT_DEVICE_TOUCH);
     [self setupDynamicActionButtons];
+    self.nativePrompts = [[ZeldaNativePromptView alloc] initWithFrame:self.view.bounds];
+    [self.view addSubview:self.nativePrompts];
 
     // 屏幕右半侧触控手势：模拟现代主流 3D 手游平滑划屏转动视角
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleCameraPan:)];
     pan.maximumNumberOfTouches = 1;
+    pan.cancelsTouchesInView = NO;
+    pan.delaysTouchesBegan = NO;
+    pan.delegate = self;
     [self.view addGestureRecognizer:pan];
 
     self.displayLink=[CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
@@ -256,26 +335,64 @@ static void start_game(void) {
     [self.displayLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
     __weak ZeldaController *weakSelf=self;
     self.monitor=[NSTimer scheduledTimerWithTimeInterval:1 repeats:YES block:^(NSTimer *timer){(void)timer;[weakSelf updatePerformance];}];
-    [NSNotificationCenter.defaultCenter addObserverForName:GCControllerDidConnectNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note){
-        if (touch_controller && note.object != touch_controller.controller) { [touch_controller disconnect];touch_controller=nil; }
+    [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationWillResignActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note){
+        (void)note; [weakSelf releaseAllActionButtons]; inputTouchStick(0, 0); weakSelf.isPanTracking = NO;
     }];
+    [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note){
+        (void)note;
+        if (!guest_running || !cloudSaveSyncIsConfigured()) return;
+        __block UIBackgroundTaskIdentifier task = UIBackgroundTaskInvalid;
+        task = [UIApplication.sharedApplication beginBackgroundTaskWithExpirationHandler:^{
+            cloudSaveSyncCancel();
+            if (task != UIBackgroundTaskInvalid) [UIApplication.sharedApplication endBackgroundTask:task];
+            task = UIBackgroundTaskInvalid;
+        }];
+        cloudSaveSyncPushAsync(^(BOOL success) {
+            if (!success) NSLog(@"CLOUD_SYNC upload skipped or failed; local save retained");
+            if (task != UIBackgroundTaskInvalid) [UIApplication.sharedApplication endBackgroundTask:task];
+            task = UIBackgroundTaskInvalid;
+        });
+    }];
+    [NSNotificationCenter.defaultCenter addObserverForName:GCControllerDidDisconnectNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note){
+        if (note.object != touch_controller.controller) inputNoteDevice(INPUT_DEVICE_TOUCH);
+    }];
+}
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gesture shouldReceiveTouch:(UITouch *)touch {
+    (void)gesture;
+    // Ignore left-hand touches before they enter this recognizer, allowing
+    // movement and one-finger camera dragging at the same time.
+    if ([touch locationInView:self.view].x < self.view.bounds.size.width * 0.40) return NO;
+    for (UIView *view = touch.view; view; view = view.superview)
+        if ([view isKindOfClass:UIControl.class]) return NO;
+    return YES;
+}
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gesture {
+    CGPoint point = [gesture locationInView:self.view];
+    UIView *hit = [self.view hitTest:point withEvent:nil];
+    for (UIView *view = hit; view; view = view.superview)
+        if ([view isKindOfClass:UIControl.class]) return NO;
+    return cameraIsGameplayActive() && point.x >= self.view.bounds.size.width * 0.40;
 }
 - (void)handleCameraPan:(UIPanGestureRecognizer *)gesture {
     CGPoint loc = [gesture locationInView:self.view];
     if (gesture.state == UIGestureRecognizerStateBegan) {
         // 只允许在屏幕右半侧开始划屏转视角，防止干扰左侧虚拟摇杆移动
-        if (loc.x >= self.view.bounds.size.width * 0.40f) {
+        [gesture setTranslation:CGPointZero inView:self.view];
+        if (cameraIsGameplayActive() && loc.x >= self.view.bounds.size.width * 0.40f) {
+            inputNoteDevice(INPUT_DEVICE_TOUCH);
             self.isPanTracking = YES;
         } else {
             self.isPanTracking = NO;
         }
     }
 
+    if (!cameraIsGameplayActive()) { self.isPanTracking = NO; return; }
     if (!self.isPanTracking) return;
 
     if (gesture.state == UIGestureRecognizerStateChanged) {
         CGPoint delta = [gesture translationInView:self.view];
         [gesture setTranslation:CGPointZero inView:self.view];
+        if (delta.x != 0 || delta.y != 0) inputNoteDevice(INPUT_DEVICE_TOUCH);
         cameraAddTouchDelta((float)delta.x, (float)delta.y);
     } else if (gesture.state == UIGestureRecognizerStateEnded || gesture.state == UIGestureRecognizerStateCancelled) {
         self.isPanTracking = NO;
@@ -283,13 +400,17 @@ static void start_game(void) {
 }
 
 - (void)setupDynamicActionButtons {
+    [self releaseAllActionButtons];
     if (!self.dynamicActionButtons) self.dynamicActionButtons = [NSMutableArray array];
+    if (!self.pressedActionButtons) self.pressedActionButtons = [NSMutableDictionary dictionary];
     for (UIButton *b in self.dynamicActionButtons) [b removeFromSuperview];
     [self.dynamicActionButtons removeAllObjects];
 
     LayoutConfig cfg = actionGetLayoutConfig();
+    BOOL hasInteraction = NO;
     for (int i = 0; i < cfg.buttonCount; i++) {
         LayoutButtonDef btnDef = cfg.buttons[i];
+        if (!strcmp(btnDef.id, "interact_a")) hasInteraction = YES;
         UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
         btn.tag = i + 100;
         btn.layer.cornerRadius = MIN(btnDef.width, btnDef.height) * 0.5f;
@@ -301,6 +422,13 @@ static void start_game(void) {
 
         CGFloat fontSize = (btnDef.width >= 70.0f) ? 17.0f : ((btnDef.width >= 50.0f) ? 14.0f : 12.0f);
         btn.titleLabel.font = [UIFont systemFontOfSize:fontSize weight:UIFontWeightBold];
+        if (!strcmp(btnDef.id, "interact_a")) {
+            btn.titleLabel.numberOfLines = 2;
+            btn.titleLabel.textAlignment = NSTextAlignmentCenter;
+            btn.titleLabel.adjustsFontSizeToFitWidth = YES;
+            btn.titleLabel.minimumScaleFactor = .7;
+            btn.contentEdgeInsets = UIEdgeInsetsMake(4, 6, 4, 6);
+        }
 
         [btn addTarget:self action:@selector(onActionButtonDown:) forControlEvents:UIControlEventTouchDown];
         [btn addTarget:self action:@selector(onActionButtonUp:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
@@ -308,6 +436,7 @@ static void start_game(void) {
         [self.view addSubview:btn];
         [self.dynamicActionButtons addObject:btn];
     }
+    inputSetTouchInteractionEnabled(hasInteraction);
 }
 
 - (void)refreshDynamicButtonLayout {
@@ -319,23 +448,46 @@ static void start_game(void) {
 
     LayoutConfig cfg = actionGetLayoutConfig();
     BOOL isLocked = cameraIsTargetLocked();
+    InputInteractionPrompt prompt = {0};
+    BOOL hasPrompt = inputGetInteractionPrompt(&prompt);
+    BOOL gameplay = cameraIsGameplayActive();
+    BOOL replacementAvailable = NO;
+    for (int i = 0; i < cfg.buttonCount; i++)
+        if (!strcmp(cfg.buttons[i].id, "interact_a")) replacementAvailable = YES;
 
     for (NSUInteger i = 0; i < self.dynamicActionButtons.count && (int)i < cfg.buttonCount; i++) {
         UIButton *btn = self.dynamicActionButtons[i];
         LayoutButtonDef btnDef = cfg.buttons[i];
+        if (gameplay && !strcmp(btnDef.id, "interact_a")) btnDef.visibleEvents = EVENT_MASK_ALWAYS;
 
         ComputedButtonRect rect = actionComputeButtonRect(&btnDef, (float)size.width, (float)size.height, &insets);
-        btn.frame = CGRectMake(rect.x, rect.y, rect.width, rect.height);
+        // Bounds/center remain well-defined during the pressed scale animation.
+        btn.bounds = CGRectMake(0, 0, rect.width, rect.height);
+        btn.center = CGPointMake(rect.x + rect.width * .5, rect.y + rect.height * .5);
         btn.layer.cornerRadius = MIN(rect.width, rect.height) * 0.5f;
 
         // 仅在游戏已载入且事件激活时显示
-        btn.hidden = !guest_running || !rect.isVisible;
+        BOOL hidden = !guest_running || !rect.isVisible || inputGetDevice() == INPUT_DEVICE_GAMEPAD;
+        if (!strcmp(btnDef.id, "interact_a")) {
+            if (gameplay) hidden |= !hasPrompt || inputGetDevice() != INPUT_DEVICE_TOUCH;
+            NSString *title = hasPrompt ? [[NSString alloc] initWithCharacters:prompt.text length:prompt.length] : @"确认";
+            BOOL titleChanged = ![btn.currentTitle isEqualToString:title];
+            if (titleChanged) [btn setTitle:title forState:UIControlStateNormal];
+            NSNumber *held = self.pressedActionButtons[@(btn.tag)];
+            if (held && (hidden || titleChanged || held.unsignedLongLongValue != (hasPrompt ? prompt.button : PAD_BTN_A)))
+                [self onActionButtonUp:btn];
+        }
+        // The primary native action now owns glider availability; an in-air
+        // guide alone is insufficient to know whether the glider can open.
+        if (!strcmp(btnDef.id, "glider_x") && gameplay && replacementAvailable) hidden = YES;
+        if (hidden && !btn.hidden) [self onActionButtonUp:btn];
+        btn.hidden = hidden;
 
         if (btnDef.padButton == PAD_BTN_ZL && isLocked) {
             // 锁敌激活时高亮
             btn.backgroundColor = [UIColor colorWithRed:0.95 green:0.75 blue:0.15 alpha:0.88];
             btn.layer.borderColor = [UIColor colorWithRed:1.0 green:0.9 blue:0.3 alpha:1.0].CGColor;
-        } else if (rect.isHighlighted) {
+        } else if (rect.isHighlighted || (gameplay && hasPrompt && !strcmp(btnDef.id, "interact_a"))) {
             btn.backgroundColor = [UIColor colorWithRed:0.2 green:0.75 blue:0.95 alpha:0.88];
             btn.layer.borderColor = [UIColor colorWithRed:0.4 green:0.9 blue:1.0 alpha:1.0].CGColor;
         } else {
@@ -355,16 +507,27 @@ static void start_game(void) {
     LayoutConfig cfg = actionGetLayoutConfig();
     if (index < 0 || index >= cfg.buttonCount) return;
     LayoutButtonDef btn = cfg.buttons[index];
+    if (!strcmp(btn.id, "interact_a")) {
+        btn.isSpecialAction = false;
+        InputInteractionPrompt prompt = {0};
+        if (cameraIsGameplayActive()) {
+            if (!inputGetInteractionPrompt(&prompt)) return;
+            btn.padButton = prompt.button;
+        } else btn.padButton = PAD_BTN_A;
+    }
+    inputNoteDevice(INPUT_DEVICE_TOUCH);
 
-    UIImpactFeedbackGenerator *feedback = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
-    [feedback impactOccurred];
+    if (zelda_settings().vibration) {
+        UIImpactFeedbackGenerator *feedback = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+        [feedback impactOccurred];
+    }
 
     [UIView animateWithDuration:0.08 animations:^{
         sender.transform = CGAffineTransformMakeScale(0.92, 0.92);
     }];
 
     if (btn.isSpecialAction) {
-        if (strcmp(btn.id, "switch_target") == 0) {
+        if (btn.padButton == PAD_BTN_SPECIAL_SWITCH) {
             cameraSwitchTarget(1);
         }
     } else {
@@ -372,24 +535,26 @@ static void start_game(void) {
             cameraToggleTargetLock();
             [self refreshDynamicButtonLayout];
         } else {
+            self.pressedActionButtons[@(sender.tag)] = @(btn.padButton);
             inputTouchButton(btn.padButton, true);
         }
     }
 }
 
 - (void)onActionButtonUp:(UIButton *)sender {
-    int index = (int)sender.tag - 100;
-    LayoutConfig cfg = actionGetLayoutConfig();
-    if (index < 0 || index >= cfg.buttonCount) return;
-    LayoutButtonDef btn = cfg.buttons[index];
-
     [UIView animateWithDuration:0.08 animations:^{
         sender.transform = CGAffineTransformIdentity;
     }];
 
-    if (!btn.isSpecialAction && btn.padButton != PAD_BTN_ZL) {
-        inputTouchButton(btn.padButton, false);
+    NSNumber *mask = self.pressedActionButtons[@(sender.tag)];
+    [self.pressedActionButtons removeObjectForKey:@(sender.tag)];
+    if (mask && ![self.pressedActionButtons.allValues containsObject:mask]) {
+        inputTouchButton(mask.unsignedLongLongValue, false);
     }
+}
+- (void)releaseAllActionButtons {
+    for (NSNumber *mask in self.pressedActionButtons.allValues) inputTouchButton(mask.unsignedLongLongValue, false);
+    [self.pressedActionButtons removeAllObjects];
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -398,6 +563,8 @@ static void start_game(void) {
 
     __weak ZeldaController *weakSelf = self;
     if (documents) {
+        [NSFileManager.defaultManager createDirectoryAtPath:[documents stringByAppendingPathComponent:@"work"]
+            withIntermediateDirectories:YES attributes:nil error:nil];
         NSString *camCfg = [documents stringByAppendingPathComponent:@"work/camera_config.json"];
         fileWatcherStart(camCfg.fileSystemRepresentation, ^(const char *path) {
             cameraCheckAndReloadConfig(path);
@@ -411,9 +578,12 @@ static void start_game(void) {
                 fseek(f, 0, SEEK_SET);
                 if (len > 0 && len < 65536) {
                     char *buf = (char *)malloc(len + 1);
+                    if (!buf) { fclose(f); return; }
                     size_t rb = fread(buf, 1, len, f);
                     buf[rb] = '\0';
-                    if (actionLayoutLoadFromJson(buf)) {
+                    NSData *data = [NSData dataWithBytes:buf length:rb];
+                    id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+                    if ([json isKindOfClass:NSDictionary.class] && [json[@"buttons"] isKindOfClass:NSArray.class] && actionLayoutLoadFromJson(buf)) {
                         dispatch_async(dispatch_get_main_queue(), ^{
                             [weakSelf setupDynamicActionButtons];
                             [weakSelf refreshDynamicButtonLayout];
@@ -428,12 +598,35 @@ static void start_game(void) {
 }
 - (BOOL)prefersStatusBarHidden { return YES; }
 - (BOOL)prefersHomeIndicatorAutoHidden { return YES; }
-- (void)press:(UIButton *)button { if (!button.tag) start_game();else input_key(button.tag==1?48:36,1); }
-- (void)release:(UIButton *)button { if (button.tag) input_key(button.tag==1?48:36,0); }
+- (void)cancelCloudSyncAction:(UIButton *)button {
+    (void)button;
+    cloudSaveSyncCancel();
+    cloudCancelButton.hidden = YES;
+}
+- (void)pickCloudFolderAction:(UIButton *)button {
+    (void)button;
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeFolder] asCopy:NO];
+    picker.delegate = self;
+    picker.allowsMultipleSelection = NO;
+    [self presentViewController:picker animated:YES completion:nil];
+}
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    NSURL *folderURL = urls.firstObject;
+    if (folderURL && cloudSaveSyncSetFolderURL(folderURL)) {
+        [cloudFolderButton setTitle:@"Cloud: Linked" forState:UIControlStateNormal];
+        status(@"Cloud folder linked.\nNext launch will sync automatically.");
+    }
+}
+- (void)press:(UIButton *)button { if (!button.tag) start_game();else inputTouchButton(button.tag==1?PAD_BTN_MINUS:PAD_BTN_PLUS,true); }
+- (void)release:(UIButton *)button { if (button.tag) inputTouchButton(button.tag==1?PAD_BTN_MINUS:PAD_BTN_PLUS,false); }
 - (void)togglePerformance:(UIButton *)button {
     (void)button; performance_expanded = !performance_expanded; [self updatePerformance];
 }
 - (void)tick:(CADisplayLink *)link {
+    cameraFrameSync();
+    [self.nativePrompts refreshNativePrompts];
+    actionDispatchEvents(inputGetActionEvents());
+    [self refreshDynamicButtonLayout];
     (void)link;pthread_mutex_lock(&vsync_mutex);uint32_t write=vsync_write;pthread_mutex_unlock(&vsync_mutex);
     if (write) { uint64_t regs[31]={write};if (!kernel_svc(0x11,regs)||regs[0]) abort(); }
 }
@@ -472,9 +665,6 @@ static void start_game(void) {
     if (physical>=0) [details addObject:[NSString stringWithFormat:@"Memory  %.2f GiB",physical]];
     if (process.lowPowerModeEnabled) [details addObject:@"Low Power Mode"];
     performance_label.text=[details componentsJoinedByString:@"\n"];
-
-    // 刷新移动端手柄与动态事件驱动按键
-    [self refreshDynamicButtonLayout];
 
     fprintf(stderr,"IOS_PERF time_s=%.3f frame=%llu fps=%.3f render_fps=%.3f p95_ms=%.3f target=%.0f width=%u height=%u "
         "gpu_ms=%.3f cpu_ms=%.3f cpu_percent=%.3f cpu_cores=%u physical_gib=%.3f available_mib=%.1f "

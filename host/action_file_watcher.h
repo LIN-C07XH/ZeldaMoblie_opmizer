@@ -11,6 +11,7 @@ typedef void (*FileChangedCallback)(const char *filePath);
 /// @param filePath 要监控的文件绝对路径
 /// @param callback 文件被修改写入时的回调函数
 /// @return 启动成功返回 true
+/// Call start/stop on the main thread; callbacks also run there, once on start.
 bool fileWatcherStart(const char *filePath, FileChangedCallback callback);
 
 /// 停止指定文件的内核监控

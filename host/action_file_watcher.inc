@@ -20,6 +20,8 @@ static int watcherCount = 0;
 
 bool fileWatcherStart(const char *filePath, FileChangedCallback callback) {
     if (!filePath || !filePath[0] || !callback) return false;
+    if (strlen(filePath) >= sizeof(watchers[0].path)) return false;
+    fileWatcherStop(filePath);
     if (watcherCount >= MAX_WATCHERS) return false;
 
     // 打开文件描述符
@@ -32,13 +34,14 @@ bool fileWatcherStart(const char *filePath, FileChangedCallback callback) {
         if (fd < 0) return false;
     }
 
-    dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
+    // UI/config reloads and watcher mutations are serialized on the main queue.
+    dispatch_queue_t queue = dispatch_get_main_queue();
     // 监听内核 VNODE 写入、属性变更、重命名及删除事件
     dispatch_source_t source = dispatch_source_create(DISPATCH_SOURCE_TYPE_VNODE,
                                                       (uintptr_t)fd,
                                                       DISPATCH_VNODE_WRITE | DISPATCH_VNODE_EXTEND |
                                                       DISPATCH_VNODE_ATTRIB | DISPATCH_VNODE_LINK |
-                                                      DISPATCH_VNODE_RENAME | DISPATCH_VNODE_REVOKE,
+                                                      DISPATCH_VNODE_RENAME | DISPATCH_VNODE_DELETE | DISPATCH_VNODE_REVOKE,
                                                       queue);
     if (!source) {
         close(fd);
@@ -58,15 +61,14 @@ bool fileWatcherStart(const char *filePath, FileChangedCallback callback) {
     char *savedPath = strdup(filePath);
 
     dispatch_source_set_event_handler(source, ^{
+        if (dispatch_source_testcancel(source)) return;
         unsigned long flags = dispatch_source_get_data(source);
-        if (flags & (DISPATCH_VNODE_WRITE | DISPATCH_VNODE_EXTEND | DISPATCH_VNODE_ATTRIB)) {
-            // 内核通知文件发生修改
-            callback(savedPath);
-        }
         if (flags & (DISPATCH_VNODE_DELETE | DISPATCH_VNODE_RENAME | DISPATCH_VNODE_REVOKE)) {
-            // 文件被编辑器原子替换或重命名，重新挂载
             fileWatcherStop(savedPath);
             fileWatcherStart(savedPath, callback);
+        } else if (flags & (DISPATCH_VNODE_WRITE | DISPATCH_VNODE_EXTEND | DISPATCH_VNODE_ATTRIB)) {
+            // 内核通知文件发生修改
+            callback(savedPath);
         }
     });
 
@@ -76,6 +78,7 @@ bool fileWatcherStart(const char *filePath, FileChangedCallback callback) {
     });
 
     dispatch_resume(source);
+    callback(filePath); // Load existing settings, including an atomic replacement.
     return true;
 }
 
@@ -91,6 +94,10 @@ void fileWatcherStop(const char *filePath) {
                 watchers[j] = watchers[j + 1];
             }
             watcherCount--;
+            watchers[watcherCount].source = nil;
+            watchers[watcherCount].callback = nil;
+            watchers[watcherCount].path[0] = '\0';
+            watchers[watcherCount].fd = -1;
             break;
         }
     }

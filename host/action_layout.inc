@@ -37,12 +37,16 @@ static uint64_t parsePadButtonName(const char *name) {
     if (strcmp(name, "R3") == 0) return PAD_BTN_R3;
     if (strcmp(name, "PLUS") == 0) return PAD_BTN_PLUS;
     if (strcmp(name, "MINUS") == 0) return PAD_BTN_MINUS;
+    if (strcmp(name, "D_LEFT") == 0) return PAD_BTN_D_LEFT;
+    if (strcmp(name, "D_UP") == 0) return PAD_BTN_D_UP;
+    if (strcmp(name, "D_RIGHT") == 0) return PAD_BTN_D_RIGHT;
+    if (strcmp(name, "D_DOWN") == 0) return PAD_BTN_D_DOWN;
     if (strcmp(name, "SWITCH") == 0) return PAD_BTN_SPECIAL_SWITCH;
     return PAD_BTN_NONE;
 }
 
 static uint32_t parseEventMask(const char *name) {
-    if (!name) return EVENT_MASK_ALWAYS;
+    if (!name) return EVENT_MASK_NONE;
     if (strcmp(name, "always") == 0) return EVENT_MASK_ALWAYS;
     if (strcmp(name, "in_air") == 0) return EVENT_MASK_IN_AIR;
     if (strcmp(name, "interact") == 0) return EVENT_MASK_INTERACT;
@@ -50,12 +54,13 @@ static uint32_t parseEventMask(const char *name) {
     if (strcmp(name, "swimming") == 0) return EVENT_MASK_SWIMMING;
     if (strcmp(name, "combat") == 0) return EVENT_MASK_COMBAT;
     if (strcmp(name, "ultrahand") == 0) return EVENT_MASK_ULTRAHAND;
-    return EVENT_MASK_ALWAYS;
+    return EVENT_MASK_NONE;
 }
 
 void actionLayoutSetDefaultMobile(void) {
     pthread_mutex_lock(&layoutLock);
     memset(&currentLayout, 0, sizeof(currentLayout));
+    currentActiveEvents = EVENT_MASK_ALWAYS;
 
     // 1. 普攻键 Y (王者平A / 吃鸡开火位置)：大圆按键 (72pt)
     LayoutButtonDef btnAttack = {
@@ -102,15 +107,15 @@ void actionLayoutSetDefaultMobile(void) {
         .isSpecialAction = false
     };
 
-    // 4. 拾取 / 互动 A (靠近交互时高亮放大)：(50pt -> 60pt)
+    // 4. Native primary action, caption and button supplied by DoCommand.
     LayoutButtonDef btnInteract = {
         .id = "interact_a",
-        .title = "✋ 拾取",
+        .title = "操作",
         .anchor = ANCHOR_BOTTOM_RIGHT,
         .offsetX = -170.0f,
         .offsetY = -145.0f,
-        .width = 50.0f,
-        .height = 50.0f,
+        .width = 104.0f,
+        .height = 54.0f,
         .padButton = PAD_BTN_A,
         .visibleEvents = EVENT_MASK_ALWAYS,
         .highlightEvents = EVENT_MASK_INTERACT,
@@ -257,8 +262,22 @@ static float extractJsonFloat(const char *block, const char *key, float defaultV
     while (*pos == ' ' || *pos == '\t') pos++;
     char *end = NULL;
     float v = strtof(pos, &end);
-    if (end == pos) return defaultVal;
+    if (end == pos) return NAN;
     return v;
+}
+
+// Locate structural delimiters without mistaking a title's braces for JSON.
+static const char *layoutDelimiter(const char *p, char delimiter) {
+    bool quoted = false, escaped = false;
+    for (; *p; p++) {
+        if (quoted) {
+            if (escaped) escaped = false;
+            else if (*p == '\\') escaped = true;
+            else if (*p == '"') quoted = false;
+        } else if (*p == '"') quoted = true;
+        else if (*p == delimiter) return p;
+    }
+    return NULL;
 }
 
 bool actionLayoutLoadFromJson(const char *jsonString) {
@@ -281,13 +300,16 @@ bool actionLayoutLoadFromJson(const char *jsonString) {
     }
 
     int count = 0;
-    while ((curr = strchr(curr, '{')) != NULL && count < MAX_LAYOUT_BUTTONS) {
-        const char *objEnd = strchr(curr, '}');
-        if (!objEnd) break;
+    const char *arrayEnd = layoutDelimiter(curr + 1, ']');
+    if (!arrayEnd) { pthread_mutex_unlock(&layoutLock); return false; }
+    bool valid = true;
+    while ((curr = layoutDelimiter(curr + 1, '{')) != NULL && curr < arrayEnd) {
+        const char *objEnd = layoutDelimiter(curr + 1, '}');
+        if (count == MAX_LAYOUT_BUTTONS || !objEnd || objEnd > arrayEnd) { valid = false; break; }
 
         size_t blockLen = (size_t)(objEnd - curr + 1);
         char *block = (char *)malloc(blockLen + 1);
-        if (!block) break;
+        if (!block) { valid = false; break; }
         strncpy(block, curr, blockLen);
         block[blockLen] = '\0';
 
@@ -312,7 +334,7 @@ bool actionLayoutLoadFromJson(const char *jsonString) {
 
         char eventStr[32] = {0};
         extractJsonString(block, "\"visible_event\"", eventStr, sizeof(eventStr));
-        btn.visibleEvents = parseEventMask(eventStr);
+        btn.visibleEvents = eventStr[0] ? parseEventMask(eventStr) : EVENT_MASK_ALWAYS;
 
         char highlightStr[32] = {0};
         extractJsonString(block, "\"highlight_event\"", highlightStr, sizeof(highlightStr));
@@ -322,15 +344,18 @@ bool actionLayoutLoadFromJson(const char *jsonString) {
             btn.isSpecialAction = true;
         }
 
-        if (btn.id[0] != '\0') {
-            newConfig.buttons[count++] = btn;
-        }
-
+        valid = btn.id[0] && btn.padButton != PAD_BTN_NONE && btn.visibleEvents != EVENT_MASK_NONE &&
+            (!highlightStr[0] || strcmp(highlightStr, "none") == 0 || btn.highlightEvents != EVENT_MASK_NONE) &&
+            isfinite(btn.offsetX) && isfinite(btn.offsetY) && isfinite(btn.width) && isfinite(btn.height) &&
+            btn.width > 0 && btn.height > 0;
+        for (int i = 0; i < count; i++) if (!strcmp(newConfig.buttons[i].id, btn.id)) valid = false;
+        if (valid) newConfig.buttons[count++] = btn;
         free(block);
-        curr = objEnd + 1;
+        if (!valid) break;
+        curr = objEnd;
     }
 
-    if (count > 0) {
+    if (valid && count > 0) {
         newConfig.buttonCount = count;
         currentLayout = newConfig;
         pthread_mutex_unlock(&layoutLock);
@@ -345,13 +370,18 @@ ComputedButtonRect actionComputeButtonRect(const LayoutButtonDef *button,
                                            float screenWidth, float screenHeight,
                                            const UiSafeAreaInsets *insets) {
     ComputedButtonRect rect = {0.0f, 0.0f, 0.0f, 0.0f, false, false};
-    if (!button || screenWidth <= 0.0f || screenHeight <= 0.0f) return rect;
+    if (!button || !isfinite(screenWidth) || !isfinite(screenHeight) || screenWidth <= 0.0f || screenHeight <= 0.0f ||
+        !isfinite(button->offsetX) || !isfinite(button->offsetY) || !isfinite(button->width) || !isfinite(button->height) ||
+        button->width <= 0 || button->height <= 0) return rect;
 
     UiSafeAreaInsets safe = {0.0f, 0.0f, 0.0f, 0.0f};
     if (insets) safe = *insets;
+    if (!isfinite(safe.left) || !isfinite(safe.right) || !isfinite(safe.top) || !isfinite(safe.bottom) ||
+        safe.left < 0 || safe.right < 0 || safe.top < 0 || safe.bottom < 0) return rect;
 
     float safeW = screenWidth - safe.left - safe.right;
     float safeH = screenHeight - safe.top - safe.bottom;
+    if (safeW < 1 || safeH < 1) return rect;
     float baseX = safe.left;
     float baseY = safe.top;
 
@@ -410,10 +440,10 @@ ComputedButtonRect actionComputeButtonRect(const LayoutButtonDef *button,
         h *= 1.15f;
     }
 
-    rect.width = roundf(w);
-    rect.height = roundf(h);
-    rect.x = roundf(baseX + button->offsetX - rect.width * 0.5f);
-    rect.y = roundf(baseY + button->offsetY - rect.height * 0.5f);
+    rect.width = fminf(safeW, fmaxf(1, roundf(w)));
+    rect.height = fminf(safeH, fmaxf(1, roundf(h)));
+    rect.x = fmaxf(safe.left, fminf(safe.left + safeW - rect.width, roundf(baseX + button->offsetX - rect.width * 0.5f)));
+    rect.y = fmaxf(safe.top, fminf(safe.top + safeH - rect.height, roundf(baseY + button->offsetY - rect.height * 0.5f)));
     rect.isVisible = visible;
     rect.isHighlighted = highlight;
 

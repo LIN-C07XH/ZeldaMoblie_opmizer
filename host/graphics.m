@@ -11,6 +11,7 @@
 #include "game_timing.h"
 #include "settings.h"
 #include "camera_controller.h"
+#include "native_prompt_overlay.inc"
 #include <unistd.h>
 
 static CAMetalLayer *metal_layer;
@@ -311,7 +312,7 @@ void front_run(void (*guest)(void)) {
                                NSEventMaskRightMouseDown | NSEventMaskRightMouseUp |
                                NSEventMaskOtherMouseDown | NSEventMaskOtherMouseUp |
                                NSEventMaskScrollWheel |
-                               NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged | NSEventMaskRightMouseDragged;
+                               NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged | NSEventMaskRightMouseDragged | NSEventMaskOtherMouseDragged;
 
         [NSEvent addLocalMonitorForEventsMatchingMask:eventMask
             handler:^NSEvent *(NSEvent *event) {
@@ -341,6 +342,7 @@ void front_run(void (*guest)(void)) {
                     if (event.keyCode == 53 && cameraIsMouseCaptured()) {
                         if (event.type == NSEventTypeKeyDown) {
                             cameraSetMouseCaptured(false);
+                            inputCancelEquipmentScroll();
                             CGAssociateMouseAndMouseCursorPosition(true);
                             [NSCursor unhide];
                         }
@@ -348,7 +350,8 @@ void front_run(void (*guest)(void)) {
                     }
 
                     // 游戏常规按键：无论是在标题、菜单还是海拉鲁大陆游玩中，一律直通虚拟手柄
-                    int down = event.type == NSEventTypeFlagsChanged ? !!(event.modifierFlags & NSEventModifierFlagShift) : event.type == NSEventTypeKeyDown;
+                    NSEventModifierFlags modifier = (event.keyCode == 59 || event.keyCode == 62) ? NSEventModifierFlagControl : NSEventModifierFlagShift;
+                    int down = event.type == NSEventTypeFlagsChanged ? !!(event.modifierFlags & modifier) : event.type == NSEventTypeKeyDown;
                     input_key(event.keyCode, down);
 
                     // 绝对必须返回 nil，表示该按键已被游戏完全消费，绝不能回退给系统触发无焦点提示音
@@ -366,13 +369,14 @@ void front_run(void (*guest)(void)) {
                                        event.type == NSEventTypeRightMouseDragged ||
                                        event.type == NSEventTypeOtherMouseDragged);
                 if (relativeMotion && cameraIsMouseCaptured()) {
+                    if (event.deltaX != 0 || event.deltaY != 0) inputNoteDevice(INPUT_DEVICE_KEYBOARD_MOUSE);
                     cameraAddMouseDelta((float)event.deltaX, (float)event.deltaY);
                     return nil;
                 }
 
                 // 释放注入的鼠标按键
                 if (event.type == NSEventTypeLeftMouseUp || event.type == NSEventTypeRightMouseUp) {
-                    inputTouchButton(event.type == NSEventTypeLeftMouseUp ? (1u << 3) : (1u << 9), false);
+                    inputPointerButton(event.type == NSEventTypeLeftMouseUp ? (1u << 3) : (1u << 9), false);
                     if (cameraIsMouseCaptured()) return nil;
                 }
                 if (event.type == NSEventTypeOtherMouseUp) {
@@ -407,49 +411,40 @@ void front_run(void (*guest)(void)) {
                     return event;
                 }
 
-                // 游戏世界生命周期门禁：只有真正载入存档进入 3D 世界游玩时才允许捕获视角！
-                if (!cameraIsGameplayActive()) {
-                    if (cameraIsMouseCaptured()) {
-                        cameraSetMouseCaptured(false);
-                        CGAssociateMouseAndMouseCursorPosition(true);
-                        [NSCursor unhide];
-                    }
-                    return event;
-                }
-
-                // 鼠标中键/侧键：单击锁定/解锁，按住左右甩动鼠标直接切换焦点目标
-                if (event.type == NSEventTypeOtherMouseDown) {
-                    cameraHandleLockDragButton(true);
-                    return nil;
-                }
-
-                // 滚轮控制：目标锁定时切换怪物；常规游玩时平滑缩放 SpringArm 弹簧臂距离 (Zoom In / Out)
+                // A quick menu temporarily pauses PlayerCamera. Keep accepting
+                // its wheel gesture while it is open, and never release pointer
+                // capture just because climbing/cutscenes change camera mode.
                 if (event.type == NSEventTypeScrollWheel) {
-                    if (cameraIsTargetLocked()) {
-                        if (fabs(event.scrollingDeltaY) > 2.0) {
-                            cameraSwitchTarget(event.scrollingDeltaY > 0 ? 1 : -1);
-                        }
-                    } else if (cameraIsMouseCaptured()) {
-                        float zoomDelta = (float)(-event.scrollingDeltaY * 0.08f);
-                        cameraAddZoom(zoomDelta);
+                    if (cameraIsMouseCaptured() && !event.hasPreciseScrollingDeltas &&
+                        event.momentumPhase == NSEventPhaseNone && event.scrollingDeltaY != 0) {
+                        CGFloat delta = event.scrollingDeltaY * (event.isDirectionInvertedFromDevice ? -1 : 1);
+                        inputScrollEquipment(delta > 0 ? 1 : -1);
                     }
+                    return cameraIsMouseCaptured() ? nil : event;
+                }
+                if (!cameraIsGameplayActive() && !cameraIsMouseCaptured()) return event;
+
+                if (event.type == NSEventTypeOtherMouseDown) {
+                    inputNoteDevice(INPUT_DEVICE_KEYBOARD_MOUSE);
+                    cameraHandleLockDragButton(true);
                     return nil;
                 }
 
                 // 鼠标左键：未捕获时激活捕获；捕获后映射近战普通攻击 (Y 键)
                 if (event.type == NSEventTypeLeftMouseDown) {
                     if (!cameraIsMouseCaptured()) {
+                        inputNoteDevice(INPUT_DEVICE_KEYBOARD_MOUSE);
                         cameraSetMouseCaptured(true);
                         CGAssociateMouseAndMouseCursorPosition(false);
                         [NSCursor hide];
                         return nil;
                     }
-                    inputTouchButton(1u << 3, true);
+                    inputPointerButton(1u << 3, true);
                     return nil;
                 }
                 if (event.type == NSEventTypeLeftMouseUp) {
                     if (cameraIsMouseCaptured()) {
-                        inputTouchButton(1u << 3, false);
+                        inputPointerButton(1u << 3, false);
                         return nil;
                     }
                 }
@@ -457,17 +452,18 @@ void front_run(void (*guest)(void)) {
                 // 鼠标右键：未捕获时激活捕获；捕获后映射拉弓瞄准/松开射出 (ZR 键)
                 if (event.type == NSEventTypeRightMouseDown) {
                     if (!cameraIsMouseCaptured()) {
+                        inputNoteDevice(INPUT_DEVICE_KEYBOARD_MOUSE);
                         cameraSetMouseCaptured(true);
                         CGAssociateMouseAndMouseCursorPosition(false);
                         [NSCursor hide];
                         return nil;
                     }
-                    inputTouchButton(1u << 9, true);
+                    inputPointerButton(1u << 9, true);
                     return nil;
                 }
                 if (event.type == NSEventTypeRightMouseUp) {
                     if (cameraIsMouseCaptured()) {
-                        inputTouchButton(1u << 9, false);
+                        inputPointerButton(1u << 9, false);
                         return nil;
                     }
                 }
@@ -487,6 +483,13 @@ void front_run(void (*guest)(void)) {
         [window makeFirstResponder:containerView];
         fit_drawable(window);
         [window center]; [window makeKeyAndOrderFront:nil];
+
+        ZeldaNativePromptView *nativePrompts = [[ZeldaNativePromptView alloc] initWithFrame:containerView.bounds];
+        [containerView addSubview:nativePrompts];
+        NSTimer *promptTimer = [NSTimer scheduledTimerWithTimeInterval:1./60 repeats:YES block:^(NSTimer *timer) {
+            (void)timer; [nativePrompts refreshNativePrompts];
+        }];
+        [[NSRunLoop currentRunLoop] addTimer:promptTimer forMode:NSRunLoopCommonModes];
 
         // 构建 UltraCam 风格 PC 键鼠实时悬浮 HUD 指南 (置于右上角，避免遮挡左下角控制面板)
         CGFloat hudW = 270, hudH = 320;
@@ -517,7 +520,7 @@ void front_run(void (*guest)(void)) {
             @"🖱️ 鼠标左键  : 近战普通攻击 (Y)\n"
             @"🖱️ 鼠标右键  : 射箭拉弓/松开射出 (ZR)\n"
             @"🖱️ 鼠标中键  : 单击锁定 / 甩动切怪\n"
-            @"🖱️ 鼠标滚轮  : 快速切换注视目标\n"
+            @"🖱️ 滚轮首上/下 : 盾 / 武器\n"
             @"⌨️ WASD     : 控制角色全向移动\n"
             @"⌨️ Space    : 跳跃 / 滑翔伞 (X)\n"
             @"⌨️ Shift    : 疾跑 / 冲刺闪避 (B)\n"
@@ -525,26 +528,39 @@ void front_run(void (*guest)(void)) {
             @"⌨️ Q 键     : 究极手技能轮盘 (L)\n"
             @"⌨️ C / Ctrl : 潜行蹲下 (L3)\n"
             @"⌨️ Tab / M  : 开启地图 (Minus)\n"
-            @"⌨️ 1/2/3/4  : 武器/弓盾材料轮盘\n"
+            @"⌨️ 1/2/3/4  : 武器/盾牌/材料/口哨\n"
             @"⌨️ ESC      : 释放光标 / 暂停菜单\n"
             @"─────────────────────────────\n"
             @"💡 左下角可呼出图形与性能设置";
         [g_keymap_hud addSubview:g_keymap_label];
         [window.contentView addSubview:g_keymap_hud positioned:NSWindowAbove relativeTo:nil];
+        NSString *keyboardGuide = g_keymap_label.stringValue;
+        __block InputDevice guideDevice = INPUT_DEVICE_KEYBOARD_MOUSE;
 
-        // 启动生命周期监测定时器：精准识别真正进入 3D 游戏游玩世界 vs 首页菜单/加载界面
-        NSTimer *lifecycleTimer = [NSTimer scheduledTimerWithTimeInterval:0.2 repeats:YES block:^(NSTimer *timer) {
+        // Native camera eligibility and OS pointer capture are independent.
+        // Only ESC, focus loss, or closing the window releases capture.
+        NSTimer *lifecycleTimer = [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer *timer) {
             (void)timer;
-            double gameSec = zelda_game_seconds();
-            // 世界时钟大于 0.2 说明已载入存档并处于 3D 游玩状态
-            BOOL inOverworld = (gameSec > 0.2);
-            if (inOverworld != cameraIsGameplayActive()) {
-                cameraSetGameplayActive(inOverworld);
-                if (!inOverworld && cameraIsMouseCaptured()) {
-                    cameraSetMouseCaptured(false);
-                    CGAssociateMouseAndMouseCursorPosition(true);
-                    [NSCursor unhide];
-                }
+            cameraFrameSync();
+            InputDevice device = inputGetDevice();
+            if (device != guideDevice) {
+                guideDevice = device;
+                g_keymap_label.stringValue = device == INPUT_DEVICE_GAMEPAD ?
+                    @"🎮 王国之泪 手柄指南 [F1 隐藏]\n"
+                    @"─────────────────────────────\n"
+                    @"左摇杆    : 移动 / 按下潜行\n"
+                    @"右摇杆    : 视角 / 按下望远镜\n"
+                    @"A         : 调查 / 拾取 / 对话\n"
+                    @"B         : 疾跑 / 闪避 / 取消\n"
+                    @"X         : 跳跃 / 滑翔伞\n"
+                    @"Y         : 近战攻击\n"
+                    @"L / R     : 技能 / 投掷\n"
+                    @"ZL / ZR   : 注视举盾 / 射箭\n"
+                    @"方向右/左 : 武器 / 盾牌\n"
+                    @"方向上/下 : 材料 / 口哨\n"
+                    @"+ / −     : 背包 / 地图\n"
+                    @"─────────────────────────────\n"
+                    @"使用键鼠后自动切回键鼠指南" : keyboardGuide;
             }
         }];
         [[NSRunLoop currentRunLoop] addTimer:lifecycleTimer forMode:NSRunLoopCommonModes];

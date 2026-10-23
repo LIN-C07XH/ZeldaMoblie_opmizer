@@ -125,8 +125,35 @@ static void testJsonCustomLayout(void) {
     assert(strcmp(cfg.buttons[0].id, "custom_attack") == 0);
     assert(cfg.buttons[0].width == 80.0f);
     assert(cfg.buttons[0].padButton == PAD_BTN_Y);
+    assert(cfg.buttons[0].highlightEvents == EVENT_MASK_NONE);
+    assert(!actionComputeButtonRect(&cfg.buttons[0], 874, 402, NULL).isHighlighted);
 
     printf("[PASS] testJsonCustomLayout (JSON 动态键位配置解析成功)\n");
+}
+
+static void testLayoutValidation(void) {
+    LayoutConfig previous = actionGetLayoutConfig();
+    assert(!actionLayoutLoadFromJson("{\"buttons\":[{\"id\":\"bad\",\"mapped_button\":\"Y\",\"width\":-1}]}"));
+    assert(!actionLayoutLoadFromJson("{\"buttons\":[{\"id\":\"bad\",\"mapped_button\":\"Y\",\"width\":1e100}]}"));
+    assert(!actionLayoutLoadFromJson("{\"buttons\":[{\"id\":\"bad\",\"mapped_button\":\"Y\",\"visible_event\":\"typo\"}]}"));
+    assert(!actionLayoutLoadFromJson("{\"buttons\":[{\"id\":\"bad\",\"mapped_button\":\"typo\"}]}"));
+    LayoutConfig retained = actionGetLayoutConfig();
+    assert(!memcmp(&previous, &retained, sizeof previous));
+    // Objects outside the buttons array cannot silently become extra buttons.
+    assert(actionLayoutLoadFromJson("{\"buttons\":[{\"id\":\"one\",\"title\":\"{}\",\"mapped_button\":\"D_LEFT\"}],\"other\":{\"id\":\"two\"}}"));
+    assert(actionGetLayoutConfig().buttonCount == 1);
+    LayoutButtonDef edge = {.anchor=ANCHOR_BOTTOM_RIGHT,.width=80,.height=80,.visibleEvents=EVENT_MASK_ALWAYS,
+                           .highlightEvents=EVENT_MASK_COMBAT};
+    UiSafeAreaInsets safe = {10, 20, 30, 40};
+    actionDispatchEvents(EVENT_MASK_COMBAT);
+    ComputedButtonRect r = actionComputeButtonRect(&edge, 320, 180, &safe);
+    assert(r.x >= 20 && r.y >= 10 && r.x + r.width <= 280 && r.y + r.height <= 150);
+    assert(!actionComputeButtonRect(&edge, NAN, 180, &safe).isVisible);
+    safe.left = 500;
+    assert(!actionComputeButtonRect(&edge, 320, 180, &safe).isVisible);
+    actionLayoutSetDefaultMobile();
+    assert(actionGetActiveEvents() == EVENT_MASK_ALWAYS);
+    puts("[PASS] layout defaults, invalid-config retention and safe-area clamping");
 }
 
 int main(void) {
@@ -134,6 +161,7 @@ int main(void) {
     testScreenAspect();
     testActionLayoutDefault();
     testJsonCustomLayout();
+    testLayoutValidation();
     printf("====== 所有动态布局单元测试全部通过！ ======\n");
     return 0;
 }

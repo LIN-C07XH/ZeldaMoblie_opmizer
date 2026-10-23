@@ -78,34 +78,11 @@ bool cameraIsGameplayActive(void);
 /// 记录物理手柄正在输入（手柄最高优先级机制，避免键鼠与手柄冲突）
 void cameraNoteGamepadActivity(void);
 
-/// 绑定与客体 main 模块的共享内存状态页 (0x3ae4040)
-void cameraBindSharedState(void *statePtr);
+/// 绑定 CAM2 原生玩家相机回调页 (main+0x3ae4040)
+bool cameraBindSharedState(void *statePtr);
 
-/// 每一帧刷新宿主与客体相机的双向数据同步 (计算 Eye 坐标并写入共享内存)
+/// 每帧清除失效的玩家相机输入；不会覆盖客体坐标。
 void cameraFrameSync(void);
 
-/// 方案 A：SpringArm 极坐标直接变换更新函数
-/// 拦截并更新当前相机的 Eye 坐标，结合鼠标/触屏当前累积的 Yaw/Pitch 和原生避障距离计算新的 Eye 位置
-/// @param ioEyeX 相机世界坐标 X 指针（输入原始值，输出计算后的新值）
-/// @param ioEyeY 相机世界坐标 Y 指针（输入原始值，输出计算后的新值）
-/// @param ioEyeZ 相机世界坐标 Z 指针（输入原始值，输出计算后的新值）
-/// @param lookAtX 注视点世界坐标 X
-/// @param lookAtY 注视点世界坐标 Y
-/// @param lookAtZ 注视点世界坐标 Z
-/// @param collisionDistance 原生物理碰撞射线算出的安全距离（若 <= 0 则忽略，使用 targetDistance）
-void cameraUpdateSpringArm(double *ioEyeX, double *ioEyeY, double *ioEyeZ,
-                           double lookAtX, double lookAtY, double lookAtZ,
-                           float collisionDistance);
-
-/// 获取当前 SpringArm 极坐标状态（yaw, pitch 弧度制，distance 米制）
+/// 最近一次原生玩家相机的角度（弧度）与距离；只用于观测。
 void cameraGetAngles(float *outYaw, float *outPitch, float *outDistance);
-
-/// 直接设置 SpringArm 极坐标状态
-void cameraSetAngles(float yaw, float pitch, float distance);
-
-/// 改变相机距离缩放（例如滚轮拉近拉远，正数为拉远，负数为拉近）
-void cameraAddZoom(float deltaZoom);
-
-/// 标记重置 SpringArm 的初值同步（下次执行 cameraUpdateSpringArm 时自动从游戏原本的 Eye/LookAt 读取方向对齐）
-void cameraRequestInitialSync(void);
-
