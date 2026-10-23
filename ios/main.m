@@ -359,6 +359,11 @@ static void start_game(void) {
         [performance_panel.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:10],
         performance_width]];
     full_touch_controller = [NSUserDefaults.standardUserDefaults boolForKey:@"ZELDA_TOUCH_FULL_CONTROLLER"];
+    if ([NSUserDefaults.standardUserDefaults objectForKey:@"ZELDA_CAMERA_NATIVE_ULTRAHAND"]) {
+        CameraConfig config = cameraGetConfig();
+        config.nativeUltrahand = [NSUserDefaults.standardUserDefaults boolForKey:@"ZELDA_CAMERA_NATIVE_ULTRAHAND"];
+        cameraSetConfig(&config);
+    }
     control_toolbar = [[UIStackView alloc] init];
     control_toolbar.axis = UILayoutConstraintAxisHorizontal; control_toolbar.spacing = 6;
     control_toolbar.translatesAutoresizingMaskIntoConstraints = NO;
@@ -389,6 +394,7 @@ static void start_game(void) {
         }
         [control_toolbar addArrangedSubview:button];
     }
+    [self refreshCameraControlMenu];
     [NSLayoutConstraint activateConstraints:@[
         [control_toolbar.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-12],
         [control_toolbar.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8]]];
@@ -597,6 +603,11 @@ static void start_game(void) {
 
         [btn addTarget:self action:@selector(onActionButtonDown:) forControlEvents:UIControlEventTouchDown];
         [btn addTarget:self action:@selector(onActionButtonUp:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
+        if (btnDef.isSpecialAction && btnDef.padButton == PAD_BTN_SPECIAL_SWITCH) {
+            UIPanGestureRecognizer *rotation = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleRotationPan:)];
+            rotation.maximumNumberOfTouches = 1; rotation.cancelsTouchesInView = NO;
+            [btn addGestureRecognizer:rotation];
+        }
 
         [self.view addSubview:btn];
         [self.dynamicActionButtons addObject:btn];
@@ -613,6 +624,7 @@ static void start_game(void) {
 
     LayoutConfig cfg = actionGetLayoutConfig();
     BOOL isLocked = cameraIsTargetLocked();
+    BOOL ultrahand = cameraIsUltrahandActive();
     for (UIButton *button in control_toolbar.arrangedSubviews) button.enabled = guest_running || button == control_mode_button || button == aspect_button;
     fallback_toolbar.hidden = !guest_running;
     for (UIButton *button in fallback_toolbar.arrangedSubviews) {
@@ -637,6 +649,12 @@ static void start_game(void) {
         UIButton *btn = self.dynamicActionButtons[i];
         LayoutButtonDef btnDef = cfg.buttons[i];
         if (!strcmp(btnDef.id, "interact_a")) btnDef.visibleEvents = EVENT_MASK_ALWAYS;
+        if (btnDef.isSpecialAction && btnDef.padButton == PAD_BTN_SPECIAL_SWITCH) {
+            NSNumber *held = self.pressedActionButtons[@(btn.tag)];
+            if (held && held.unsignedLongLongValue == PAD_BTN_R && !ultrahand) [self onActionButtonUp:btn];
+            [btn setTitle:ultrahand ? @"旋转" : touch_title(@(btnDef.title), @"切换") forState:UIControlStateNormal];
+            btn.accessibilityHint = ultrahand ? @"按住并滑动旋转物体" : @"切换锁定目标";
+        }
 
         ComputedButtonRect rect = actionComputeButtonRect(&btnDef, (float)size.width, (float)size.height, &insets);
         // Bounds/center remain well-defined during the pressed scale animation.
@@ -688,6 +706,9 @@ static void start_game(void) {
     LayoutConfig cfg = actionGetLayoutConfig();
     if (index < 0 || index >= cfg.buttonCount) return;
     LayoutButtonDef btn = cfg.buttons[index];
+    if (btn.isSpecialAction && btn.padButton == PAD_BTN_SPECIAL_SWITCH && cameraIsUltrahandActive()) {
+        btn.isSpecialAction = false; btn.padButton = PAD_BTN_R;
+    }
     if (!strcmp(btn.id, "interact_a")) {
         btn.isSpecialAction = false;
         InputInteractionPrompt prompt = {0};
@@ -728,6 +749,20 @@ static void start_game(void) {
         inputTouchButton(mask.unsignedLongLongValue, false);
     }
 }
+- (void)handleRotationPan:(UIPanGestureRecognizer *)gesture {
+    UIButton *button = (UIButton *)gesture.view;
+    if (full_touch_controller || !cameraIsUltrahandActive()) return;
+    if (gesture.state == UIGestureRecognizerStateBegan) [self onActionButtonDown:button];
+    NSNumber *held = self.pressedActionButtons[@(button.tag)];
+    if (held.unsignedLongLongValue != PAD_BTN_R) return;
+    if (gesture.state == UIGestureRecognizerStateBegan || gesture.state == UIGestureRecognizerStateChanged) {
+        CGPoint delta = [gesture translationInView:self.view];
+        [gesture setTranslation:CGPointZero inView:self.view];
+        cameraAddTouchDelta((float)delta.x, (float)delta.y);
+    } else if (gesture.state == UIGestureRecognizerStateEnded || gesture.state == UIGestureRecognizerStateCancelled || gesture.state == UIGestureRecognizerStateFailed) {
+        [self onActionButtonUp:button];
+    }
+}
 - (void)releaseAllActionButtons {
     for (NSNumber *mask in self.pressedActionButtons.allValues) inputTouchButton(mask.unsignedLongLongValue, false);
     [self.pressedActionButtons removeAllObjects];
@@ -744,7 +779,8 @@ static void start_game(void) {
             withIntermediateDirectories:YES attributes:nil error:nil];
         NSString *camCfg = [documents stringByAppendingPathComponent:@"work/camera_config.json"];
         fileWatcherStart(camCfg.fileSystemRepresentation, ^(const char *path) {
-            cameraCheckAndReloadConfig(path);
+            if (cameraCheckAndReloadConfig(path))
+                dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf refreshCameraControlMenu]; });
         });
         NSString *layoutCfg = [documents stringByAppendingPathComponent:@"work/layout_config.json"];
         fileWatcherStart(layoutCfg.fileSystemRepresentation, ^(const char *path) {
@@ -824,6 +860,25 @@ static void start_game(void) {
     [self setupDynamicActionButtons];
     [self refreshDynamicButtonLayout];
     if (guest_running) connect_touch_controller();
+}
+- (void)refreshCameraControlMenu {
+    __weak ZeldaController *weakSelf = self;
+    NSMutableArray<UIAction *> *actions = [NSMutableArray array];
+    for (int mode = 1; mode >= 0; mode--) {
+        BOOL direct = mode == 1;
+        UIAction *action = [UIAction actionWithTitle:direct ? @"究极手：直接视角" : @"究极手：模拟右摇杆"
+            image:nil identifier:nil handler:^(UIAction *selected) {
+                (void)selected;
+                CameraConfig config = cameraGetConfig(); config.nativeUltrahand = direct;
+                cameraSetConfig(&config);
+                [NSUserDefaults.standardUserDefaults setBool:direct forKey:@"ZELDA_CAMERA_NATIVE_ULTRAHAND"];
+                [weakSelf refreshCameraControlMenu];
+            }];
+        action.state = cameraGetConfig().nativeUltrahand == direct ? UIMenuElementStateOn : UIMenuElementStateOff;
+        [actions addObject:action];
+    }
+    control_mode_button.menu = [UIMenu menuWithTitle:@"视角控制" children:actions];
+    control_mode_button.accessibilityHint = @"点击切换虚拟手柄；长按设置究极手视角";
 }
 - (void)togglePerformance:(UIButton *)button {
     (void)button; performance_expanded = !performance_expanded; [self updatePerformance];

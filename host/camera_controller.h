@@ -10,6 +10,7 @@ typedef struct {
     float decayFactor;
     bool invertY;
     bool rawMouseMode;
+    bool nativeUltrahand;
 } CameraConfig;
 
 /// 初始化相机控制器
@@ -76,11 +77,12 @@ void cameraSetGameplayActive(bool active);
 
 /// 查询当前是否真正处于可控 3D 游玩状态中
 bool cameraIsGameplayActive(void);
+bool cameraIsUltrahandActive(void);
 
 /// 记录物理手柄正在输入（手柄最高优先级机制，避免键鼠与手柄冲突）
 void cameraNoteGamepadActivity(void);
 
-/// 绑定 CAM2 原生玩家相机回调页 (main+0x3ae4040)
+/// 绑定 CAM3 原生玩家相机回调页 (main+0x3ae4040)
 bool cameraBindSharedState(void *statePtr);
 
 /// 每帧清除失效的玩家相机输入；不会覆盖客体坐标。

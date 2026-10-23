@@ -63,10 +63,10 @@ static const struct { unsigned key; uint64_t button; } mapping[] = {
 };
 
 static void inputUpdateStickModeLocked(void) {
-    uint64_t held = touch_buttons | virtual_buttons;
+    uint64_t held = touch_buttons | virtual_buttons | controller_buttons;
     for (unsigned i = 0; i < sizeof mapping / sizeof *mapping; i++)
         if (keys[mapping[i].key]) held |= mapping[i].button;
-    cameraSetRightStickMode((held & ((1u << 12) | (1u << 13) | (1u << 14))) != 0);
+    cameraSetRightStickMode((held & ((1u << 7) | (1u << 12) | (1u << 13) | (1u << 14))) != 0);
 }
 
 void input_key(unsigned code, int pressed) {
@@ -96,6 +96,7 @@ void input_clear(void) {
 void input_controller_clear(void) {
     pthread_mutex_lock(&input_lock);
     controller_buttons = controller_latched = 0; memset(controller_axes, 0, sizeof controller_axes);
+    inputUpdateStickModeLocked();
     pthread_mutex_unlock(&input_lock);
     if (inputGetDevice() == INPUT_DEVICE_GAMEPAD) inputNoteDevice(INPUT_DEVICE_KEYBOARD_MOUSE);
 }
@@ -161,6 +162,7 @@ void input_controller(uint64_t buttons, float lx, float ly, float rx, float ry) 
     pthread_mutex_lock(&input_lock);
     buttons &= 0xffff;
     controller_latched |= buttons & ~controller_buttons; controller_buttons = buttons;
+    inputUpdateStickModeLocked();
     for (unsigned s = 0; s < 2; s++) {
         float x = axes[s * 2], y = axes[s * 2 + 1];
         if (!isfinite(x) || !isfinite(y) || hypotf(x, y) < .12f) x = y = 0;

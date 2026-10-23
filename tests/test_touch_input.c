@@ -44,6 +44,9 @@ int main(void) {
     inputTouchButton(1u<<12, true); cameraAddTouchDelta(-30, 0); state=sample();
     assert((state.buttons & (1u<<12)) && state.rx < 0);
     inputTouchButton(1u<<12, false); assert(!sample().rx);
+    input_key(15, true); cameraAddMouseDelta(30, 0); state=sample();
+    assert((state.buttons & (1u<<7)) && state.rx > 0);
+    input_key(15, false); assert(!sample().rx);
     inputScrollEquipment(1); assert(!sample().buttons);
     puts("Touch input: title confirmation, four axes, pulses, independent sources, clearing and controller priority passed");
 }

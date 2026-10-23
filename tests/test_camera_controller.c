@@ -131,9 +131,58 @@ static void testEquipmentAndMenuRouting(void) {
     cameraAddTouchDelta(20, -5); assert(cameraPoll(&x, &y) && x > 0 && y > 0);
     cameraAddMouseDelta(20, 0); cameraReset(); assert(!cameraPoll(&x, &y));
 }
+static float ultraMinimum = 10, ultraMaximum = 170;
+static unsigned ultraParameterCalls;
+static void *ultraType(void) { return (void *)0x123; }
+static void *ultraParameter(void *container, void *type) {
+    (void)container; assert(type == (void *)0x123); ultraParameterCalls++; return &ultraMinimum;
+}
+static const float *ultraLow(void *parameter) { (void)parameter; return &ultraMinimum; }
+static const float *ultraHigh(void *parameter) { (void)parameter; return &ultraMaximum; }
+static void testUltrahandOrbit(void) {
+    setup();
+    _Alignas(16) unsigned char execution[0x380] = {0};
+    void *vtable[] = {(void *)ultraParameter};
+    void **container = vtable;
+    void *parameterContainer = &container;
+    memcpy(execution + 0x28, &parameterContainer, sizeof parameterContainer);
+    cameraTargetApi.targetType = ultraType;
+    cameraTargetApi.minimum = ultraLow; cameraTargetApi.maximum = ultraHigh;
+    float *pitch = (float *)(execution + 0xa4), *yaw = (float *)(execution + 0xa8);
+    float *yawOffset = (float *)(execution + 0xbc);
+    *pitch = orbit[1]; *yaw = *yawOffset = orbit[2];
+    cameraAddMouseDelta(100, 100); // mode entry discards old Chase input
+    cameraApplyUltrahandOrbit(orbit, execution, component); unchanged(4.8f,15,30);
+    assert(cameraIsUltrahandActive());
+    cameraAddMouseDelta(20, 10);
+    cameraApplyUltrahandOrbit(orbit, execution, component);
+    assert(orbit[0] == 4.8f && orbit[1] > 15 && orbit[2] < 30);
+    assert(fabsf(*pitch - orbit[1]) < .0001f && fabsf(*yaw - orbit[2]) < .0001f);
+    assert(fabsf(*yawOffset - orbit[2]) < .0001f);
+    float savedPitch = orbit[1], savedYaw = orbit[2];
+    cameraApplyUltrahandOrbit(orbit, execution, component); unchanged(4.8f,savedPitch,savedYaw);
+    ultraMaximum = 50; cameraAddTouchDelta(0, 5000);
+    cameraApplyUltrahandOrbit(orbit, execution, component);
+    assert(orbit[1] == 50 && *pitch == 50); ultraMaximum = 170;
+    CameraConfig config = cameraGetConfig(); config.nativeUltrahand = false; cameraSetConfig(&config);
+    unsigned calls = ultraParameterCalls;
+    cameraAddTouchDelta(25, 0); int32_t x, y;
+    assert(cameraPoll(&x, &y) && x > 0 && y == 0);
+    cameraApplyUltrahandOrbit(orbit, execution, component); unchanged(4.8f,50,savedYaw);
+    assert(ultraParameterCalls == calls); // fallback never invokes the new guest parameter API
+    config.nativeUltrahand = true; cameraSetConfig(&config);
+    cameraSetRightStickMode(true); cameraAddMouseDelta(25, 0);
+    assert(cameraPoll(&x, &y) && x > 0);
+    cameraApplyUltrahandOrbit(orbit, execution, component); unchanged(4.8f,50,savedYaw);
+    cameraSetRightStickMode(false);
+    ultraMinimum = NAN; cameraApplyUltrahandOrbit(orbit, execution, component);
+    cameraAddMouseDelta(25, 0); assert(cameraPoll(&x, &y) && x > 0); ultraMinimum = 10;
+    cameraAddTouchDelta(10, 10); tick(); unchanged(4.8f,50,savedYaw); // return to Chase drops input
+    assert(!cameraIsUltrahandActive());
+}
 static void testBoundBridge(void) {
-    ZeldaCameraSharedState shared = {.magic = "CAM2", .version = 2};
-    cameraBindSharedState(&shared); assert(shared.callback != 0);
+    ZeldaCameraSharedState shared = {.magic = "CAM3", .version = 3};
+    cameraBindSharedState(&shared); assert(shared.callback != 0 && shared.ultrahandCallback != 0);
     setup(); cameraAddMouseDelta(50, 20);
     ((void (*)(float *, float *, const void *))shared.callback)(orbit, &pitchState, component);
     assert(orbit[0] == 4.8f && orbit[2] < 30 && orbit[1] > 15);
@@ -145,6 +194,6 @@ int main(void) {
     testTitleAndMovieGates(); testTransitionsDropQueuedInput();
     testPitchAndInvalidValues(); testLockKeepsNativeCamera();
     testNativeModesKeepLockAndDropMotion(); testNativeTargetLossAndEmptyHold();
-    testEquipmentAndMenuRouting(); testBoundBridge();
-    puts("PASS: native player orbit, unchanged arm, mouse/touch, lifecycle, transitions, lock, CAM2 bridge");
+    testEquipmentAndMenuRouting(); testUltrahandOrbit(); testBoundBridge();
+    puts("PASS: native player orbit, unchanged arm, mouse/touch, lifecycle, transitions, lock, UltraHand, CAM3 bridge");
 }

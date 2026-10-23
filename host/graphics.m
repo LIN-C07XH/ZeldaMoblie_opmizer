@@ -205,6 +205,12 @@ static void apply_vibration(int mode) {
 @property (weak) NSWindow *window;
 @end
 @implementation ZeldaMenu
+- (void)ultrahandCamera:(NSMenuItem *)item {
+    CameraConfig config = cameraGetConfig();
+    config.nativeUltrahand = item.tag == 1;
+    cameraSetConfig(&config);
+    [NSUserDefaults.standardUserDefaults setBool:config.nativeUltrahand forKey:@"ZeldaNativeUltrahand"];
+}
 - (void)targetFPS:(NSMenuItem *)item { apply_target_fps((unsigned)item.tag); }
 - (void)fullScreen:(id)sender { (void)sender; [self.window toggleFullScreen:nil]; }
 - (void)metalFX:(NSMenuItem *)item { apply_metalfx((int)item.tag); }
@@ -213,6 +219,8 @@ static void apply_vibration(int mode) {
 - (void)toggleControls:(id)sender { (void)sender; controls_toggle(); }
 - (void)quit:(id)sender { (void)sender; [self.window performClose:nil]; }
 - (BOOL)validateMenuItem:(NSMenuItem *)item {
+    if (item.action == @selector(ultrahandCamera:))
+        item.state = cameraGetConfig().nativeUltrahand == (item.tag == 1) ? NSControlStateValueOn : NSControlStateValueOff;
     if (item.action == @selector(targetFPS:)) {
         item.state = zelda_target_fps() == (unsigned)item.tag ? NSControlStateValueOn : NSControlStateValueOff;
         return zelda_target_fps() != 0;
@@ -239,6 +247,13 @@ static void install_menu(ZeldaMenu *actions) {
     NSMenu *bar = [NSMenu new];
     NSMenu *app = [[NSMenu alloc] initWithTitle:@"Zelda-Mobile"];
     [app addItem:menu_item(@"Controls", @selector(toggleControls:), @",", NSEventModifierFlagCommand, actions)];
+    NSMenu *camera = [[NSMenu alloc] initWithTitle:@"究极手视角"];
+    for (int mode = 1; mode >= 0; mode--) {
+        NSMenuItem *item = menu_item(mode ? @"直接视角" : @"模拟右摇杆", @selector(ultrahandCamera:), @"", 0, actions);
+        item.tag = mode; [camera addItem:item];
+    }
+    NSMenuItem *cameraItem = [[NSMenuItem alloc] initWithTitle:camera.title action:nil keyEquivalent:@""];
+    cameraItem.submenu = camera; [app addItem:cameraItem];
     [app addItem:[NSMenuItem separatorItem]];
     [app addItem:menu_item(@"Quit Zelda-Mobile", @selector(quit:), @"q", NSEventModifierFlagCommand, actions)];
     NSMenu *view = [[NSMenu alloc] initWithTitle:@"View"];
@@ -294,6 +309,11 @@ void front_run(void (*guest)(void)) {
         ZeldaMenu *actions = [ZeldaMenu new]; actions.window = window;
         // Sound used to be saved in user defaults; carry it into the settings file once.
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        if ([defaults objectForKey:@"ZeldaNativeUltrahand"]) {
+            CameraConfig config = cameraGetConfig();
+            config.nativeUltrahand = [defaults boolForKey:@"ZeldaNativeUltrahand"];
+            cameraSetConfig(&config);
+        }
         if ([defaults objectForKey:@"ZeldaSoundMuted"]) {
             bool muted = [defaults boolForKey:@"ZeldaSoundMuted"];
             store_settings(^(zelda_settings_t *settings) { settings->muted = muted; });
