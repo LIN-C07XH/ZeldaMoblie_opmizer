@@ -1,4 +1,4 @@
-"""TotK 1.4.3 Chase and scoped UltraHand orbit input before native pose/collision.
+"""TotK 1.4.3 Chase, ability selection and scoped UltraHand orbit input before native pose/collision.
 
 UltraCam's CameraControl signature identifies main+0x62883c, a late matrix
 builder shared by scene cameras. It is intentionally left untouched here.
@@ -12,16 +12,26 @@ import struct
 from game_timing import BUILD_ID, STATE_OFFSET
 
 CAMERA_STATE_OFFSET = STATE_OFFSET + 0x40
-MAGIC = b'CAM3\0\0\0\0'
+MAGIC = b'CAM4\0\0\0\0'
 ULTRAHAND_SITE = 0x23d7b70
 ULTRAHAND_ORIGINAL = bytes.fromhex('609a40bd')  # ldr s0,[x19,#0x98]
 ULTRAHAND_VTABLE = 0x3793ec0
+SELECTION_SITE = 0x23d380c
+SELECTION_ORIGINAL = bytes.fromhex('a06301d1')  # sub x0,x29,#0x58
+SELECTION_VTABLE = 0x3793868  # ExecutePlayerCameraSpecialPower; before grabbing
 SITE = 0x18f100
 LIFECYCLE_SITE = 0x8749e8
 LIFECYCLE_ORIGINAL = bytes.fromhex('890640f9')  # ldr x9,[x20,#8]
 ORIGINAL = bytes.fromhex('08c15839')  # ldrb w8,[x8,#0x630]
 # Independent anchors reject a coincidental byte match or changed call chain.
 ANCHORS = {
+    0x3793988: struct.pack('<Q', 0x23d2d40),  # SpecialPower vtable+0x120
+    0x23d2d40: bytes.fromhex('ff0305d1'),  # sub sp,sp,#0x140
+    0x23d2d6c: bytes.fromhex('fd830391'),  # add x29,sp,#0xe0
+    0x23d299c: bytes.fromhex('61ae01bd60b201bd'),  # native latitude limits +1ac/+1b0
+    0x23d3810: bytes.fromhex('b776d397'),  # native polar -> vector
+    0x23d3824: bytes.fromhex('23baff97'),  # requested Eye = native target + vector
+    0x23d43fc: bytes.fromhex('204500d000ec2191c0035fd6'),  # getName: SpecialPower
     0xc6f6e0: bytes.fromhex('080440f9080540f900fd40f9c0035fd6'),
     0x1951320: bytes.fromhex('081441f9680000b400d941f9c0035fd6e0031faac0035fd6'),
 
@@ -51,19 +61,20 @@ def apply_camera_hook(env):
     if env['BUILD_ID'] != BUILD_ID:
         raise ValueError('Camera hook requires the verified v1.4.3 main Build ID')
     image, emit, here = env['IMG'], env['emit'], env['here']
-    if CAMERA_STATE_OFFSET + 0x20 > env['PATCH_OFF'] or image[STATE_OFFSET:STATE_OFFSET + 8] != b'ZFPS143\0':
+    if CAMERA_STATE_OFFSET + 0x28 > env['PATCH_OFF'] or image[STATE_OFFSET:STATE_OFFSET + 8] != b'ZFPS143\0':
         raise ValueError('Camera hook needs the timing state page')
-    for offset, expected in {SITE: ORIGINAL, LIFECYCLE_SITE: LIFECYCLE_ORIGINAL, ULTRAHAND_SITE: ULTRAHAND_ORIGINAL, **ANCHORS}.items():
+    for offset, expected in {SITE: ORIGINAL, LIFECYCLE_SITE: LIFECYCLE_ORIGINAL, ULTRAHAND_SITE: ULTRAHAND_ORIGINAL, SELECTION_SITE: SELECTION_ORIGINAL, **ANCHORS}.items():
         if image[offset:offset + len(expected)] != expected:
             raise ValueError(f'Camera hook instruction mismatch at {offset:#x}')
-    image[CAMERA_STATE_OFFSET:CAMERA_STATE_OFFSET + 0x20] = MAGIC + struct.pack('<IIQQ', 3, 0, 0, 0)
+    image[CAMERA_STATE_OFFSET:CAMERA_STATE_OFFSET + 0x28] = MAGIC + struct.pack('<IIQQQ', 4, 0, 0, 0, 0)
     def pair(base, rt, rt2, offset, scale):
         return base | ((offset // scale & 127) << 15) | (rt2 << 10) | (31 << 5) | rt
 
     writes, routines = [], {}
     for name, site, original, orbit_update in [("orbit", SITE, ORIGINAL, True),
             ("lifecycle", LIFECYCLE_SITE, LIFECYCLE_ORIGINAL, False),
-            ("ultrahand", ULTRAHAND_SITE, ULTRAHAND_ORIGINAL, False)]:
+            ("ultrahand", ULTRAHAND_SITE, ULTRAHAND_ORIGINAL, False),
+            ("selection", SELECTION_SITE, SELECTION_ORIGINAL, False)]:
         start = here()
         # A mid-function call has more live state than an ABI function entry. Save
         # all vector registers, caller GPRs, LR, NZCV, FPCR and FPSR. Never use x18.
@@ -78,22 +89,25 @@ def apply_camera_hook(env):
             emit(pair(0xad000000, reg, reg + 1, 0xc0 + reg * 16, 16))
         scope_skip = None
         null_skips = []
-        if name == "ultrahand":
+        ability_update = name in ("ultrahand", "selection")
+        if ability_update:
             # Shared Target update also serves lock-on and event cameras.
-            # Only the exact UltraHand execution class may call this bridge.
+            # Each ability bridge accepts only its exact execution class;
+            # ordinary Aiming, lock-on and event cameras retain native control.
             emit(0xf9400271)  # ldr x17,[x19]
-            emit(env['ADRP'](15, here(), ULTRAHAND_VTABLE))
-            emit(0x910001ef | ((ULTRAHAND_VTABLE & 0xfff) << 10))
+            vtable = ULTRAHAND_VTABLE if name == "ultrahand" else SELECTION_VTABLE
+            emit(env['ADRP'](15, here(), vtable))
+            emit(0x910001ef | ((vtable & 0xfff) << 10))
             emit(0xeb0f023f)  # cmp x17,x15
             scope_skip = here(); emit(0)
         emit(env['ADRP'](16, here(), CAMERA_STATE_OFFSET))
         emit(0x91000210 | ((CAMERA_STATE_OFFSET & 0xfff) << 10))
-        emit(0xf9400e10 if name == "ultrahand" else 0xf9400a10)
+        emit(0xf9401210 if name == "selection" else 0xf9400e10 if ability_update else 0xf9400a10)
         skip = here()
         emit(0)
-        if name == "ultrahand":
+        if ability_update:
             emit(0xd10163a0)  # sub x0,x29,#0x58: native {radius,latitude,longitude}
-            emit(0xaa1303e1)  # x1 = current UltraHand execution
+            emit(0xaa1303e1)  # x1 = current ability camera execution
             # Same live owner -> PlayerCamera chain as UltraHand's native
             # c6f6e0 / 1951320 helpers; no retained component pointer.
             for rn, offset in [(19, 8), (2, 8), (2, 0x1f8), (2, 0x228), (2, 0x3b0)]:
@@ -105,7 +119,7 @@ def apply_camera_hook(env):
         else:
             emit(0xaa1f03e0)                 # x0 = NULL: observe player lifecycle only
             emit(0xaa1f03e1)                 # x1 = NULL
-        if name != "ultrahand":
+        if not ability_update:
             emit(0xaa1303e2)             # x2 = PlayerCamera component x19
         emit(0xd63f0200)                 # blr x16
         restore = here()
@@ -135,4 +149,4 @@ def apply_camera_hook(env):
                            reason='Native player camera ' + name))
         routines[name] = dict(offset=start, size=len(code), sha256=hashlib.sha256(code).hexdigest())
     return dict(state_offset=CAMERA_STATE_OFFSET, site=SITE, lifecycle_site=LIFECYCLE_SITE,
-                ultrahand_site=ULTRAHAND_SITE, abi=3, writes=writes, routines=routines)
+                ultrahand_site=ULTRAHAND_SITE, selection_site=SELECTION_SITE, abi=4, writes=writes, routines=routines)

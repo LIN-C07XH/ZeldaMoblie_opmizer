@@ -31,6 +31,9 @@ typedef struct {
     bool ultrahandAnglesOwned;
     const void *ultrahandExecution;
     float ultrahandPitch, ultrahandYaw;
+    bool selectionAnglesOwned;
+    const void *selectionExecution;
+    float selectionPitch, selectionYaw;
     const void *playerCamera;
     uintptr_t playerTarget;
     double pendingYaw, pendingPitch;
@@ -44,15 +47,16 @@ static CameraState globalCameraState = {
                DEFAULT_ACCEL_FACTOR, 0, false, true, true}
 };
 
-// CAM3 keeps Chase and the strictly scoped UltraHand callback independent.
+// CAM4 keeps Chase, held-object UltraHand and selection callbacks independent.
 // The guest invokes this immutable callback synchronously on its camera thread.
 typedef struct {
     char magic[8];
     uint32_t version, reserved;
-    uintptr_t callback, ultrahandCallback;
+    uintptr_t callback, ultrahandCallback, selectionCallback;
 } ZeldaCameraSharedState;
 _Static_assert(offsetof(ZeldaCameraSharedState, callback) == 0x10, "camera callback ABI");
-_Static_assert(sizeof(ZeldaCameraSharedState) == 0x20, "camera bridge ABI");
+_Static_assert(offsetof(ZeldaCameraSharedState, selectionCallback) == 0x20, "selection callback ABI");
+_Static_assert(sizeof(ZeldaCameraSharedState) == 0x28, "camera bridge ABI");
 static struct {
     void *(*targetType)(void);
     const float *(*minimum)(void *), *(*maximum)(void *);
@@ -74,10 +78,13 @@ static double cameraNow(void) {
 static struct {
     unsigned long input, nativeInput, stickInput, chase, lifecycle, ultra, applied, resets;
     unsigned long lifecycleDrops, chaseDrops, ultraDrops, chaseReleases;
+    unsigned long selection, selectionApplied, selectionDrops;
     unsigned long reportedInput;
     double reportTick;
     unsigned reject;
     float minimum, maximum, beforePitch, beforeYaw, afterPitch, afterYaw;
+    unsigned selectionReject;
+    float selectionMinimum, selectionMaximum;
 } cameraDiagnostics;
 
 static void cameraReportRoutingLocked(void) {
@@ -86,7 +93,7 @@ static void cameraReportRoutingLocked(void) {
     if (cameraDiagnostics.input == cameraDiagnostics.reportedInput || now - cameraDiagnostics.reportTick < 1) return;
     cameraDiagnostics.reportTick = now;
     cameraDiagnostics.reportedInput = cameraDiagnostics.input;
-    fprintf(stderr, "[CAMERA_ROUTE] input=%lu native=%lu stick=%lu callbacks=(%lu,%lu,%lu) ultra_apply=%lu resets=%lu drops=(%lu,%lu,%lu) chase_release=%lu reject=%#x mode=%u direct=%d stick_only=%d captured=%d owned=%d ages=(%.3f,%.3f) pending=(%.5f,%.5f) limits=(%.2f,%.2f) ultra_angles=(%.2f,%.2f)->(%.2f,%.2f)\n",
+    fprintf(stderr, "[CAMERA_ROUTE] input=%lu native=%lu stick=%lu callbacks=(%lu,%lu,%lu) ultra_apply=%lu resets=%lu drops=(%lu,%lu,%lu) chase_release=%lu reject=%#x mode=%u direct=%d stick_only=%d captured=%d owned=%d ages=(%.3f,%.3f) pending=(%.5f,%.5f) limits=(%.2f,%.2f) ultra_angles=(%.2f,%.2f)->(%.2f,%.2f) selection=(%lu,%lu,%lu,%#x) selection_limits=(%.2f,%.2f)\n",
         cameraDiagnostics.input, cameraDiagnostics.nativeInput, cameraDiagnostics.stickInput,
         cameraDiagnostics.lifecycle, cameraDiagnostics.chase, cameraDiagnostics.ultra,
         cameraDiagnostics.applied, cameraDiagnostics.resets, cameraDiagnostics.lifecycleDrops,
@@ -98,12 +105,16 @@ static void cameraReportRoutingLocked(void) {
         now - globalCameraState.lastUltrahandTick, globalCameraState.pendingYaw,
         globalCameraState.pendingPitch, cameraDiagnostics.minimum, cameraDiagnostics.maximum,
         cameraDiagnostics.beforePitch, cameraDiagnostics.beforeYaw,
-        cameraDiagnostics.afterPitch, cameraDiagnostics.afterYaw);
+        cameraDiagnostics.afterPitch, cameraDiagnostics.afterYaw,
+        cameraDiagnostics.selection, cameraDiagnostics.selectionApplied,
+        cameraDiagnostics.selectionDrops, cameraDiagnostics.selectionReject,
+        cameraDiagnostics.selectionMinimum, cameraDiagnostics.selectionMaximum);
 #endif
 }
 
 static void cameraDiscardInputLocked(void) {
     globalCameraState.ultrahandAnglesOwned = false;
+    globalCameraState.selectionAnglesOwned = false;
     globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
     globalCameraState.isTargetLocked = false;
     globalCameraState.switchPulseTicks = 0;
@@ -117,7 +128,7 @@ static void cameraDiscardInputLocked(void) {
 static bool cameraGameplayActiveLocked(void);
 static bool cameraNativeOrbitLocked(void) {
     return !globalCameraState.rightStickOnly && cameraGameplayActiveLocked() &&
-        (globalCameraState.orbitMode != 2 || globalCameraState.config.nativeUltrahand) &&
+        (globalCameraState.orbitMode < 2 || globalCameraState.config.nativeUltrahand) &&
         globalCameraState.lastOrbitTick > 0 &&
         cameraNow() - globalCameraState.lastOrbitTick <= .075 &&
         globalCameraState.lastPlayerTick - globalCameraState.lastOrbitTick <= .050;
@@ -193,6 +204,7 @@ static void cameraApplyPlayerOrbit(float *orbit, float *pitchState, const void *
     globalCameraState.orbitMode = 1;
     if (globalCameraState.ultrahandAnglesOwned) cameraDiagnostics.chaseReleases++;
     globalCameraState.ultrahandAnglesOwned = false;
+    globalCameraState.selectionAnglesOwned = false;
     globalCameraState.isGameplayActive = valid;
     globalCameraState.lastPlayerTick = now;
     globalCameraState.playerCamera = component;
@@ -282,6 +294,7 @@ static void cameraApplyUltrahandOrbit(float *orbit, void *execution, const void 
             valid, globalCameraState.config.nativeUltrahand, globalCameraState.rightStickOnly,
             minimum, maximum, globalCameraState.pendingYaw, globalCameraState.pendingPitch);
     globalCameraState.orbitMode = 2;
+    globalCameraState.selectionAnglesOwned = false;
     globalCameraState.ultrahandExecution = execution;
     globalCameraState.lastUltrahandTick = active ? now : 0;
     // Invalid parameters must leave input on the right-stick fallback path.
@@ -326,10 +339,86 @@ static void cameraApplyUltrahandOrbit(float *orbit, void *execution, const void 
     pthread_mutex_unlock(&cameraLock);
 }
 
+// Before a grab, SpecialPower uses its own Aiming-derived update, not Target.
+// Hook immediately before 0x23d3810 converts the final local polar pose. Limits
+// +1ac/+1b0 have already been inherited, sorted and normalized by 0x23d28fc.
+static void cameraApplySelectionOrbit(float *orbit, void *execution, const void *component) {
+    if (!orbit || !execution || !component) return;
+    uint32_t flags; uintptr_t target;
+    memcpy(&flags, (const char *)component + 0x34, sizeof flags);
+    memcpy(&target, (const char *)component + 0xc90, sizeof target);
+    extern bool zelda_is_movie(void);
+    bool active = target && !(flags & 3) && !zelda_is_movie();
+    float *pitch = (float *)((char *)execution + 0x50);
+    float *yaw = (float *)((char *)execution + 0x54);
+    float *pitchDesired = (float *)((char *)execution + 0x160);
+    float *yawDesired = (float *)((char *)execution + 0x164);
+    float minimum, maximum;
+    memcpy(&minimum, (char *)execution + 0x1ac, sizeof minimum);
+    memcpy(&maximum, (char *)execution + 0x1b0, sizeof maximum);
+    bool valid = active && isfinite(minimum) && isfinite(maximum) &&
+        minimum >= -180 && maximum <= 180 && minimum <= maximum &&
+        isfinite(orbit[0]) && orbit[0] > 0 && orbit[0] < 500 &&
+        isfinite(orbit[1]) && isfinite(orbit[2]) && isfinite(*pitch) &&
+        isfinite(*yaw) && isfinite(*pitchDesired) && isfinite(*yawDesired);
+
+    pthread_mutex_lock(&cameraLock);
+    double now = cameraNow();
+    if (!active) cameraDiscardInputLocked();
+    bool continuous = globalCameraState.playerCamera == component && globalCameraState.playerTarget == target &&
+        globalCameraState.orbitMode == 3 && globalCameraState.selectionExecution == execution &&
+        now - globalCameraState.lastOrbitTick <= PLAYER_CAMERA_TIMEOUT;
+    bool direct = globalCameraState.config.nativeUltrahand && !globalCameraState.rightStickOnly &&
+        !globalCameraState.isTargetLocked;
+    cameraDiagnostics.selection++;
+    cameraDiagnostics.selectionMinimum = minimum; cameraDiagnostics.selectionMaximum = maximum;
+    cameraDiagnostics.selectionReject = (!valid ? 1u : 0) | (!continuous ? 2u : 0) | (!direct ? 4u : 0);
+    if (!valid || !continuous || !direct) {
+        if (globalCameraState.pendingYaw || globalCameraState.pendingPitch) cameraDiagnostics.selectionDrops++;
+        globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
+        globalCameraState.selectionAnglesOwned = false;
+    }
+    globalCameraState.orbitMode = 3;
+    globalCameraState.ultrahandAnglesOwned = false;
+    globalCameraState.selectionExecution = execution;
+    globalCameraState.playerCamera = component;
+    globalCameraState.playerTarget = target;
+    globalCameraState.lastOrbitTick = valid && direct ? now : 0;
+    globalCameraState.lastPlayerTick = now;
+    globalCameraState.isGameplayActive = active;
+    if (valid && direct && (globalCameraState.pendingYaw || globalCameraState.pendingPitch) &&
+        !globalCameraState.selectionAnglesOwned) {
+        globalCameraState.selectionPitch = orbit[1];
+        globalCameraState.selectionYaw = orbit[2];
+        globalCameraState.selectionAnglesOwned = true;
+    }
+    if (valid && direct && globalCameraState.selectionAnglesOwned) {
+        const double degrees = 180.0 / M_PI;
+        orbit[1] = globalCameraState.selectionPitch = (float)fmax(minimum, fmin(maximum,
+            globalCameraState.selectionPitch + globalCameraState.pendingPitch * degrees));
+        orbit[2] = globalCameraState.selectionYaw = (float)remainder(
+            globalCameraState.selectionYaw + globalCameraState.pendingYaw * degrees, 360);
+        // SpecialPower has desired and smoothed angles at different offsets
+        // from held-object UltraHand. Align both without touching gyro state,
+        // target position, native arm length or the downstream collision path.
+        *pitch = *pitchDesired = orbit[1];
+        *yaw = *yawDesired = orbit[2];
+        cameraDiagnostics.selectionApplied++;
+    }
+    if (valid) {
+        globalCameraState.currentPitch = orbit[1] * (float)(M_PI / 180);
+        globalCameraState.currentYaw = orbit[2] * (float)(M_PI / 180);
+        globalCameraState.targetDistance = orbit[0];
+    }
+    cameraReportRoutingLocked();
+    globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
+    pthread_mutex_unlock(&cameraLock);
+}
+
 bool cameraBindSharedState(void *statePtr) {
     if (!statePtr) return false;
     ZeldaCameraSharedState *state = statePtr;
-    if (memcmp(state->magic, "CAM3\0\0\0\0", 8) || state->version != 3) {
+    if (memcmp(state->magic, "CAM4\0\0\0\0", 8) || state->version != 4) {
         fprintf(stderr, "[CAMERA_HOOK] incompatible bridge; rebuild patched modules\n");
         return false;
     }
@@ -339,7 +428,8 @@ bool cameraBindSharedState(void *statePtr) {
     cameraTargetApi.maximum = (void *)(base + 0x18a9598);
     __atomic_store_n(&state->callback, (uintptr_t)cameraApplyPlayerOrbit, __ATOMIC_RELEASE);
     __atomic_store_n(&state->ultrahandCallback, (uintptr_t)cameraApplyUltrahandOrbit, __ATOMIC_RELEASE);
-    fprintf(stderr, "[CAMERA_BRIDGE] CAM3 UltraHand persistent angles; routing diagnostics v1\n");
+    __atomic_store_n(&state->selectionCallback, (uintptr_t)cameraApplySelectionOrbit, __ATOMIC_RELEASE);
+    fprintf(stderr, "[CAMERA_BRIDGE] CAM4 selection + held-object UltraHand; routing diagnostics v2\n");
     return true;
 }
 
@@ -456,6 +546,7 @@ void cameraSetMouseCaptured(bool captured) {
     pthread_mutex_lock(&cameraLock);
     globalCameraState.mouseCaptured = captured;
     globalCameraState.ultrahandAnglesOwned = false;
+    globalCameraState.selectionAnglesOwned = false;
     globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
     globalCameraState.stickX = globalCameraState.stickY = 0;
     pthread_mutex_unlock(&cameraLock);
@@ -472,6 +563,7 @@ void cameraToggleMouseCapture(void) {
     pthread_mutex_lock(&cameraLock);
     globalCameraState.mouseCaptured = !globalCameraState.mouseCaptured;
     globalCameraState.ultrahandAnglesOwned = false;
+    globalCameraState.selectionAnglesOwned = false;
     globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
     pthread_mutex_unlock(&cameraLock);
 }
@@ -568,6 +660,7 @@ void cameraSetRightStickMode(bool enabled) {
         globalCameraState.stickX = globalCameraState.stickY = 0;
         globalCameraState.rightStickOnly = enabled;
         globalCameraState.ultrahandAnglesOwned = false;
+        globalCameraState.selectionAnglesOwned = false;
     }
     pthread_mutex_unlock(&cameraLock);
 }
@@ -588,6 +681,7 @@ void cameraSetConfig(const CameraConfig *newConfig) {
     {
         if (globalCameraState.config.nativeUltrahand != newConfig->nativeUltrahand) {
             globalCameraState.ultrahandAnglesOwned = false;
+            globalCameraState.selectionAnglesOwned = false;
             globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
             globalCameraState.stickX = globalCameraState.stickY = 0;
         }

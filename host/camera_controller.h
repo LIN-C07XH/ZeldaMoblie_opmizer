@@ -82,7 +82,7 @@ bool cameraIsUltrahandActive(void);
 /// 记录物理手柄正在输入（手柄最高优先级机制，避免键鼠与手柄冲突）
 void cameraNoteGamepadActivity(void);
 
-/// 绑定 CAM3 原生玩家相机回调页 (main+0x3ae4040)
+/// 绑定 CAM4 原生玩家相机回调页 (main+0x3ae4040)
 bool cameraBindSharedState(void *statePtr);
 
 /// 每帧清除失效的玩家相机输入；不会覆盖客体坐标。

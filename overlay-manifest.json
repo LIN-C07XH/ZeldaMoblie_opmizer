@@ -77,14 +77,14 @@
     "host/camera_controller.h": {
       "base": null,
       "overlay": {
-        "sha256": "d95fe72ff941bc082ef9cc7e97178ab0ec3f4477ab3cf2b0634fb0bc8e84641b",
+        "sha256": "8eaac54cfc365b82327ca68c4a9313c929eec15b88bc3d7938417e56033d1c69",
         "mode": 420
       }
     },
     "host/camera_controller.inc": {
       "base": null,
       "overlay": {
-        "sha256": "397b2d61df400dbc2bd1d017eecccfcd484d88453f657e21de4fd072c20946bf",
+        "sha256": "5ab8d68b6fff125cd2c2d9911b19749ca79e25fd214592e0627cc4b7c8041e65",
         "mode": 420
       }
     },
@@ -639,14 +639,14 @@
     "tests/test_camera_controller.c": {
       "base": null,
       "overlay": {
-        "sha256": "d006191d369ae0e4be387a4356b1514521410f3fe41b8c239f61f55064221794",
+        "sha256": "626dcddfd50e2c4978c976e1f389fd1e8f9f113c6f7de90c0afb0f4f667aadf9",
         "mode": 420
       }
     },
     "tests/test_camera_hook.py": {
       "base": null,
       "overlay": {
-        "sha256": "85d149d6c385a4b80ed4f726605b3fca987e836ca3737c431cda94b8953d8df6",
+        "sha256": "265b475cfbcca04d8f6ab039535283fd175d54c3e5d08808b82116632bcf2655",
         "mode": 420
       }
     },
@@ -815,7 +815,7 @@
     "tools/camera_hook.py": {
       "base": null,
       "overlay": {
-        "sha256": "c5aee51347b3f006ec3076573577125e05b9eab65ee66d3a4127a8410834466e",
+        "sha256": "ac6d3d166079bf19447517b7aafc6b502cbe84d5f9032b093c24f6b275598323",
         "mode": 420
       }
     },

@@ -208,13 +208,78 @@ static void testUltrahandOrbit(void) {
     cameraAddTouchDelta(10, 10); tick(); unchanged(4.8f,50,savedYaw); // return to Chase drops input
     assert(!cameraIsUltrahandActive());
 }
+static void testSelectionOrbit(void) {
+    setup();
+    _Alignas(16) unsigned char execution[0x200] = {0};
+    float *pitch = (float *)(execution + 0x50), *yaw = (float *)(execution + 0x54);
+    float *desiredPitch = (float *)(execution + 0x160), *desiredYaw = (float *)(execution + 0x164);
+    float *minimum = (float *)(execution + 0x1ac), *maximum = (float *)(execution + 0x1b0);
+    *pitch = *desiredPitch = orbit[1]; *yaw = *desiredYaw = orbit[2];
+    *minimum = -60; *maximum = 70;
+    cameraAddMouseDelta(100, 100);
+    cameraApplySelectionOrbit(orbit, execution, component); unchanged(4.8f,15,30);
+    assert(!cameraIsUltrahandActive()); // phone rotation button is for a held object only
+    for (int frame = 0; frame < 40; frame++) {
+        testTime += .016;
+        cameraApplyPlayerOrbit(NULL, NULL, component);
+        // SpecialPower may reframe toward its aiming/gyro state every update.
+        orbit[0] = 2 + frame * .01f; orbit[1] = 15; orbit[2] = 30;
+        cameraAddTouchDelta(10, 2);
+        cameraApplySelectionOrbit(orbit, execution, component);
+        float expectedYaw = remainderf(30 - (frame + 1) * 10 * DEFAULT_SENSITIVITY_X * ANGLE_RADIAN_SCALE * 180 / M_PI, 360);
+        assert(fabsf(remainderf(orbit[2] - expectedYaw, 360)) < .0002f);
+        assert(orbit[0] == 2 + frame * .01f && orbit[1] > 15);
+        assert(*pitch == orbit[1] && *desiredPitch == orbit[1]);
+        assert(*yaw == orbit[2] && *desiredYaw == orbit[2]);
+    }
+    float savedPitch = orbit[1], savedYaw = orbit[2], distance = orbit[0];
+    orbit[1] = 15; orbit[2] = 30;
+    cameraApplySelectionOrbit(orbit, execution, component); unchanged(distance,savedPitch,savedYaw);
+    cameraAddTouchDelta(0, 5000); cameraApplySelectionOrbit(orbit, execution, component);
+    assert(orbit[1] == 70 && *desiredPitch == 70);
+    cameraAddTouchDelta(0, -5000); cameraApplySelectionOrbit(orbit, execution, component);
+    assert(orbit[1] == -60 && *desiredPitch == -60);
+    // A native fixed-pitch range still permits horizontal aiming.
+    *minimum = *maximum = 20; cameraAddMouseDelta(10, 0);
+    cameraApplySelectionOrbit(orbit, execution, component);
+    assert(orbit[1] == 20 && orbit[2] < savedYaw);
+    *minimum = -60; *maximum = 70;
+    // Selection's callback must never write the held-object camera's fields.
+    assert(*(float *)(execution + 0xa4) == 0 && *(float *)(execution + 0xa8) == 0);
+    cameraSetRightStickMode(true); orbit[1] = 20; orbit[2] = 40;
+    cameraAddMouseDelta(20, 0); int32_t x, y;
+    assert(cameraPoll(&x, &y) && x > 0);
+    cameraApplySelectionOrbit(orbit, execution, component); unchanged(distance,20,40);
+    cameraSetRightStickMode(false);
+    cameraApplySelectionOrbit(orbit, execution, component);
+    cameraAddMouseDelta(10, 0); cameraApplySelectionOrbit(orbit, execution, component);
+    assert(orbit[2] < 40);
+    cameraNoteGamepadActivity(); orbit[1] = 25; orbit[2] = 55;
+    cameraApplySelectionOrbit(orbit, execution, component); unchanged(distance,25,55);
+    CameraConfig config = cameraGetConfig(); config.nativeUltrahand = false; cameraSetConfig(&config);
+    cameraAddTouchDelta(20, 0); assert(cameraPoll(&x, &y) && x > 0);
+    cameraApplySelectionOrbit(orbit, execution, component); unchanged(distance,25,55);
+    config.nativeUltrahand = true; cameraSetConfig(&config);
+    // Invalid limits, movies, instance/target changes and mode exits drop input.
+    *minimum = NAN; cameraApplySelectionOrbit(orbit, execution, component);
+    cameraAddTouchDelta(20, 0); assert(cameraPoll(&x, &y) && x > 0); *minimum = -60;
+    cameraApplySelectionOrbit(orbit, execution, component);
+    cameraAddMouseDelta(10, 0); movie = true;
+    cameraApplySelectionOrbit(orbit, execution, component); unchanged(distance,25,55); movie = false;
+    cameraApplySelectionOrbit(orbit, execution, component);
+    cameraAddMouseDelta(10, 0);
+    _Alignas(16) unsigned char replacement[sizeof execution]; memcpy(replacement,execution,sizeof execution);
+    cameraApplySelectionOrbit(orbit, replacement, component); unchanged(distance,25,55);
+    cameraAddMouseDelta(10, 0); tick(); unchanged(distance,25,55);
+    assert(!globalCameraState.selectionAnglesOwned);
+}
 static void testBoundBridge(void) {
-    ZeldaCameraSharedState shared = {.magic = "CAM3", .version = 3};
-    cameraBindSharedState(&shared); assert(shared.callback != 0 && shared.ultrahandCallback != 0);
+    ZeldaCameraSharedState shared = {.magic = "CAM4", .version = 4};
+    cameraBindSharedState(&shared); assert(shared.callback != 0 && shared.ultrahandCallback != 0 && shared.selectionCallback != 0);
     setup(); cameraAddMouseDelta(50, 20);
     ((void (*)(float *, float *, const void *))shared.callback)(orbit, &pitchState, component);
     assert(orbit[0] == 4.8f && orbit[2] < 30 && orbit[1] > 15);
-    ZeldaCameraSharedState old = {.magic = "CAM1", .version = 1};
+    ZeldaCameraSharedState old = {.magic = "CAM3", .version = 3};
     cameraBindSharedState(&old); assert(old.callback == 0);
 }
 int main(void) {
@@ -222,6 +287,6 @@ int main(void) {
     testTitleAndMovieGates(); testTransitionsDropQueuedInput();
     testPitchAndInvalidValues(); testLockKeepsNativeCamera();
     testNativeModesKeepLockAndDropMotion(); testNativeTargetLossAndEmptyHold();
-    testEquipmentAndMenuRouting(); testUltrahandOrbit(); testBoundBridge();
-    puts("PASS: native player orbit, unchanged arm, mouse/touch, lifecycle, transitions, lock, UltraHand, CAM3 bridge");
+    testEquipmentAndMenuRouting(); testUltrahandOrbit(); testSelectionOrbit(); testBoundBridge();
+    puts("PASS: native player orbit, unchanged arm, mouse/touch, lifecycle, transitions, lock, UltraHand selection/held states, CAM4 bridge");
 }
