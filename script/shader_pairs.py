@@ -20,9 +20,13 @@ from build_shaders import chain
 from index_shaders import archive, read, span, stage
 
 ROOT = Path(__file__).resolve().parents[1]
-# The movie renderer links shaders from separate embedded programs rather than
-# an archive program table. Captured and verified from the v1.4.3 movie draw.
-MOVIE_PAIRS = {('8c2e77dd83720228', 'd012849722bc10d4')}
+# All four variants of each v1.4.3 agl_common nv12decode / texture_gamma
+# program, verified against its BAHS program/variation table. A movie needs
+# both stages; bundling only a captured gamma draw misses NV12 conversion.
+MOVIE_PAIRS = {(vs, ps)
+               for vs in ('91108972e5eaf6c7', '8c2e77dd83720228')
+               for ps in ('0cf2109dd57c77fa', '71aa9c809617fb70',
+                          'd012849722bc10d4', 'b079ad2db91ab951')}
 # v1.4.3 play on the underground autosave: material skinning reads location 6 as uint, and the matching G-buffer
 # pass binds an unsigned colour target 6; cave meshes use unsigned locations/targets 0 and 1.
 SEEN_MASKS = {

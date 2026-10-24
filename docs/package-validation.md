@@ -135,3 +135,10 @@ Physical phone gesture, layout and screen-edge acceptance remain with the user.
 CAM3 adds a third trampoline at the shared Target update, guarded by the exact UltraHand vtable and a live owner/component walk with null checks. Unicorn exercises enabled/disabled callbacks, a different Target subclass, missing owner components and GPR/SIMD/flags restoration. ASan/UBSan checks native parameter bounds, persistent angle accumulators, one-shot consumption, camera transitions, fallback without invoking the new guest parameter API and R-held native input. The complete overlay regression runner passed.
 
 Mac build and load-only validation passed with 3 modules and the existing 8 unresolved glslc imports. The iOS 26 / Metal 4 unsigned check build with Xcode 26.2 passed, including the new long-press control menu and contextual rotation-button code. Modules were regenerated for CAM3. No game or phone application was started; actual UltraHand focus, collision and touch rotation remain for user testing. Existing unrelated uncommitted rendering edits were preserved.
+
+
+2026-10-24 视频闪退复查：通过已有配对只读导出手机 boot.log、变体请求和 16:44 的崩溃报告。崩溃 UUID BCDC5FE3-1DCD-3EFF-BA6D-6B6E417183DD 与用户签名 Metal4 构建匹配；视频开始时缺少 72fce7435f390518，pso_predict_rest.cold.2 主动 abort。日志同时确认旧 14ba7fd9ad1cc9ac 补充资源已安装，故为视频支持范围不全，而非旧资源漏推送。请求是 VS 8c2e77dd83720228 + PS 71aa9c809617fb70、mask=0，对应 agl_common 的 nv12decode 程序。
+
+直接检查 agl_common BAHS 程序表：nv12decode 与 texture_gamma 各含 4 个原生变体。补充包现在覆盖全部 8 组组合的 24 份转换后 MSL／反射数据，由构建时生成并打入应用，不提交游戏资源到源码仓库。新增 SHA-256 清单与构建／安装前校验；手机启动按清单校验包内资源并原子补齐或修复缓存。CMake 跟踪资源集合变化，不再依赖写死“4 个文件”的启动条件。测试覆盖新 NV12 请求、完整包、损坏文件、缺失文件以及只有 4 项的旧清单。未安装或启动手机应用。
+
+本次验证：覆盖包离线回归通过；12 份真实视频 MSL 在 Mac Metal 设备上按运行时数学策略编译成功；重新生成的 iOS Metal4 检查应用与用户现有签名工程均构建成功，最终 `.app` 内 24 项资源全部通过清单哈希校验，Xcode CodeSign 步骤成功。单独执行 macOS `codesign --verify --strict` 返回本机证书信任链错误 CSSMERR_TP_NOT_TRUSTED，因此未据此宣称设备签名验收通过。原团队和包名保持不变；未安装、未启动手机应用，视频实际播放仍由用户测试。

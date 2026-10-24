@@ -65,8 +65,8 @@ endforeach()
 file(GLOB MODULE_TABLES "${ROOT}/work/patched/*.tsv")
 target_sources(ZeldaMobile PRIVATE ${MODULE_TABLES})
 set_source_files_properties(${MODULE_TABLES} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/patched")
-file(GLOB_RECURSE MOVIE_SHADERS "${IOS_WORK}/shader-support/*")
-if(NOT MOVIE_SHADERS)
+file(GLOB_RECURSE MOVIE_SHADERS CONFIGURE_DEPENDS "${IOS_WORK}/shader-support/*")
+if(NOT EXISTS "${IOS_WORK}/shader-support/manifest.json")
   message(FATAL_ERROR "Run script/prepare_ios_shader_support.py before configuring iOS")
 endif()
 foreach(SHADER ${MOVIE_SHADERS})
@@ -75,6 +75,11 @@ foreach(SHADER ${MOVIE_SHADERS})
   target_sources(ZeldaMobile PRIVATE "${SHADER}")
   set_source_files_properties("${SHADER}" PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/shader-support/${SHADER_FOLDER}")
 endforeach()
+add_custom_command(TARGET ZeldaMobile POST_BUILD
+  COMMAND "${CMAKE_COMMAND}" -E copy_directory "${IOS_WORK}/shader-support" "$<TARGET_BUNDLE_DIR:ZeldaMobile>/shader-support"
+  COMMAND "${ROOT}/work/venv/bin/python" "${ROOT}/script/prepare_ios_shader_support.py"
+          --verify-bundle "$<TARGET_BUNDLE_DIR:ZeldaMobile>"
+  COMMENT "Copy and verify complete iOS movie shader support" VERBATIM)
 configure_file("/System/Library/Fonts/Supplemental/AppleGothic.ttf" "${IOS_WORK}/shared.ttf" COPYONLY)
 target_sources(ZeldaMobile PRIVATE "${IOS_WORK}/shared.ttf")
 set_source_files_properties("${IOS_WORK}/shared.ttf" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)

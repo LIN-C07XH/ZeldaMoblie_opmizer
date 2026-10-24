@@ -4,6 +4,7 @@
 #import <AVFAudio/AVFAudio.h>
 #import <GameController/GameController.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import <CommonCrypto/CommonDigest.h>
 #include <mach/mach.h>
 #include <os/proc.h>
 #include <sys/resource.h>
@@ -152,6 +153,14 @@ static void status(NSString *text) {
     dispatch_async(dispatch_get_main_queue(), ^{ status_label.text = text; });
 }
 
+static NSString *movieShaderDigest(NSData *data) {
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
+    NSMutableString *hex = [NSMutableString stringWithCapacity:sizeof(digest) * 2];
+    for (unsigned i = 0; i < sizeof(digest); i++) [hex appendFormat:@"%02x", digest[i]];
+    return hex;
+}
+
 void front_run(void (*guest)(void)) {
     if (cloudSaveSyncIsConfigured()) {
         dispatch_sync(dispatch_get_main_queue(), ^{
@@ -171,19 +180,35 @@ void front_run(void (*guest)(void)) {
 
     NSString *directory = [[documents stringByAppendingPathComponent:@"work/shaders"]
         stringByAppendingPathComponent:@"b-" DMSH_CHAIN];
-    NSString *support = [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"shader-support/b-" DMSH_CHAIN];
+    NSString *supportRoot = [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"shader-support"];
+    NSString *support = [supportRoot stringByAppendingPathComponent:@"b-" DMSH_CHAIN];
     NSFileManager *fm = NSFileManager.defaultManager;
-    NSArray<NSString *> *supportFiles = [fm contentsOfDirectoryAtPath:support error:nil];
-    if (supportFiles.count != 4) {
+    NSData *manifestData = [NSData dataWithContentsOfFile:[supportRoot stringByAppendingPathComponent:@"manifest.json"]];
+    id manifest = manifestData ? [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:nil] : nil;
+    NSArray *supportFiles = [manifest isKindOfClass:NSDictionary.class] ? manifest[@"files"] : nil;
+    if (![supportFiles isKindOfClass:NSArray.class] || !supportFiles.count ||
+        [manifest[@"version"] integerValue] != 1 || ![manifest[@"chain"] isEqual:@DMSH_CHAIN]) {
         status(@"缺少视频着色器支持资源，请重新构建 iOS 应用。");
         return;
     }
     [fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:nil];
-    for (NSString *file in supportFiles) {
+    for (NSDictionary *entry in supportFiles) {
+        NSString *file = [entry isKindOfClass:NSDictionary.class] ? entry[@"name"] : nil;
+        if (![file isKindOfClass:NSString.class] || ![file.lastPathComponent isEqual:file]) {
+            status(@"视频着色器支持资源清单无效，请重新构建 iOS 应用。");
+            return;
+        }
+        NSData *source = [NSData dataWithContentsOfFile:[support stringByAppendingPathComponent:file]];
+        if (!source.length || source.length != [entry[@"size"] unsignedLongLongValue] ||
+            ![movieShaderDigest(source) isEqual:entry[@"sha256"]]) {
+            fprintf(stderr, "IOS_MOVIE_SHADER invalid bundle resource %s\n", file.UTF8String);
+            status(@"视频着色器支持资源不完整，请重新构建 iOS 应用。");
+            return;
+        }
         NSString *destination = [directory stringByAppendingPathComponent:file];
-        if (![fm fileExistsAtPath:destination]) {
+        if (![source isEqualToData:[NSData dataWithContentsOfFile:destination]]) {
             NSError *error = nil;
-            if (![fm copyItemAtPath:[support stringByAppendingPathComponent:file] toPath:destination error:&error]) {
+            if (![source writeToFile:destination options:NSDataWritingAtomic error:&error]) {
                 fprintf(stderr, "IOS_MOVIE_SHADER copy failed code=%ld\n", (long)error.code);
                 status(@"视频着色器资源无法准备，请检查可用空间后重启。");
                 return;
@@ -191,6 +216,7 @@ void front_run(void (*guest)(void)) {
             fprintf(stderr, "IOS_MOVIE_SHADER installed %s\n", file.UTF8String);
         }
     }
+    fprintf(stderr, "IOS_MOVIE_SHADER verified chain=%s files=%lu\n", DMSH_CHAIN, (unsigned long)supportFiles.count);
     CFAbsoluteTime began = CFAbsoluteTimeGetCurrent();
     fprintf(stderr, "SHADER_PREP begin chain=%s scope=needed platform=ios\n", DMSH_CHAIN);
     unsigned failed = shader_prep_run(metal_layer.device, directory, ^(unsigned count, unsigned total) {

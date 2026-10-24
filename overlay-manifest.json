@@ -496,7 +496,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "c171862c9d675973a0896663d4ca457206510e831f64d39b1a21b93e2ba202b6",
+        "sha256": "a4381b5fc285b1bc422c06cc97c69fe69e51ff686f47d998d21e41e1c562b26f",
         "mode": 420
       }
     },
@@ -520,7 +520,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "e0957b2a45307be1f0c70f1f531e659d29d6d40c1ae677f1b8b9e39b71807a09",
+        "sha256": "f61fc49e331d6a37d599473144243772160bc9c9458023ac1cd3fc2f014f1619",
         "mode": 420
       }
     },
@@ -550,7 +550,7 @@
         "mode": 493
       },
       "overlay": {
-        "sha256": "47acc06def19d1b522a714fdeddd5d62f1dbc227187a0b387c7ffbc04af91f78",
+        "sha256": "af3e79aa0d4b7cbd078433c5e2645f39cbfcdc1ae180d2ede2a4cbb32fb14310",
         "mode": 493
       }
     },
@@ -574,7 +574,7 @@
     "script/prepare_ios_shader_support.py": {
       "base": null,
       "overlay": {
-        "sha256": "59489a248dd3ffb4d0c356bcd7cdd811fd284baba7c6d34bf5ba23483a34057b",
+        "sha256": "e71c55975f9be4189107fa3ea8bf2cd7df8fd97633c14fcb107b200ee0a4ddfb",
         "mode": 420
       }
     },
@@ -608,7 +608,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "3dd3f3ffad15fc96a4dcf378fc4fe0200c3a82288c448a2b46aaf85ee65c74e9",
+        "sha256": "9820fccdd55dc8062cf089cbb76013288547faa23d0034bc1937e84c5966ca33",
         "mode": 420
       }
     },
@@ -711,7 +711,7 @@
     "tests/test_ios_shader_support.py": {
       "base": null,
       "overlay": {
-        "sha256": "4e0b28289f7fb4f5ec1c74e5814fcf0bead5b65ce84f35d7184543c43c93f779",
+        "sha256": "462dcafe6b4715dde8a656c5c282a37c19f4b241c8d732547d84362b16385426",
         "mode": 420
       }
     },

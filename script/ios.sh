@@ -24,9 +24,11 @@ build)
     xcodebuild -project "$ios_build_dir/ZeldaMobile.xcodeproj" -target ZeldaMobile \
         -configuration Release -sdk iphoneos -jobs 4 -allowProvisioningUpdates \
         -allowProvisioningDeviceRegistration build
+    work/venv/bin/python script/prepare_ios_shader_support.py --verify-bundle "$app"
     ;;
 install)
     : "${ZELDA_IOS_DEVICE:?Set ZELDA_IOS_DEVICE to the target device}"
+    work/venv/bin/python script/prepare_ios_shader_support.py --verify-bundle "$app"
     xcrun devicectl device install app --device "$ZELDA_IOS_DEVICE" "$app"
     ;;
 launch)

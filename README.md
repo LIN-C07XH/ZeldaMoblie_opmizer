@@ -63,7 +63,7 @@ work/venv/bin/python script/prepare_render_resources.py
 
 键鼠提示需要新的 `work/romfs-host.bin`：脚本从用户自己的资源生成字体映射和文本容量补丁，不分发额外字体，不修改 `work/romfs.bin`。Mac 默认启动会检查派生资源；自定义 `ZELDA_ROMFS` 应指向这份文件。iOS 需要重新构建应用，并通过目标的 `script/ios.sh transfer` 更新派生资源。
 
-iOS 构建会在 Mac 上预生成并打包视频渲染所需的着色器接口组合，启动时只补齐手机缓存中缺少的文件。手机能编译已有 MSL 和 Metal 管线，不能运行 Mac 的游戏着色器转换工具。直接配置 CMake 前须运行 `work/venv/bin/python script/prepare_ios_shader_support.py`；`script/ios.sh build` 已包含这一步。
+iOS 构建会在 Mac 上预生成并打包 `nv12decode` 与 `texture_gamma` 的全部 8 组视频着色器接口组合（24 份 MSL／反射文件），并生成带 SHA-256 的资源清单。启动时校验资源并自动补齐或修复手机缓存；构建后和安装前也会核对包内清单，旧包或缺项会明确报错。手机能编译已有 MSL 和 Metal 管线，不能运行 Mac 的游戏着色器转换工具。直接配置 CMake 前须运行 `work/venv/bin/python script/prepare_ios_shader_support.py`；`script/ios.sh build` 已包含这一步。
 
 iOS 默认 Metal 4 / iOS 26；需要 iOS 17 时设置 `ZELDA_IOS_METAL=3`（需要 iPhoneOS 18 及以上 SDK），并按目标项目指南构建。云存档使用系统文件夹选择器，没有新增 CloudKit entitlement；应用签名和原有内存 entitlement 的要求仍由主项目决定。
 
