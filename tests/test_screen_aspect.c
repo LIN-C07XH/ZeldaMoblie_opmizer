@@ -24,6 +24,11 @@ int main(void) {
     assert(phone.originX==239 && phone.originY==0 && phone.width==2144 && phone.height==1206);
     phone=screenAspectViewport(2622,1206,1920,1080,ASPECT_MODE_FILL);
     assert(phone.originX==0 && phone.width==2622 && phone.height==1475 && phone.originY==-135);
+    ScreenViewport native=screenAspectViewport(2622,1206,2352,1080,ASPECT_MODE_NATIVE_WIDE);
+    assert(native.originX==0 && native.originY==0 && native.width==2622 && native.height==1206);
+    // Missing native negotiation falls back to an uncropped frame, never Fill.
+    native=screenAspectViewport(2622,1206,1920,1080,ASPECT_MODE_NATIVE_WIDE);
+    assert(native.originY==0 && native.height==1206 && native.originX>0);
     ScreenViewport invalid=screenAspectViewport(NAN,1206,1920,1080,ASPECT_MODE_FILL);
     assert(!invalid.width && !invalid.height && isfinite(invalid.originX));
     puts("Display aspect: phone/tablet fit, centered fill crop, pixel/point scaling and invalid sizes passed");

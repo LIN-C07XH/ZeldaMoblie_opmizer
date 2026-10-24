@@ -323,13 +323,42 @@ static void testUltrahandDetach(void) {
     assert(cameraTriggerUltrahandDetach()); testTime += .2;
     assert(!cameraPoll(&x, &y) && !x && !y); // no stale pulses in menus
 }
+static void testNativeDisplayAspect(void) {
+    cameraSetDisplayAspect(0); uint32_t resolution[] = {1920,1080};
+    cameraAdjustOutputSize(resolution); assert(resolution[0] == 1920 && resolution[1] == 1080);
+    cameraSetDisplayAspect(874.f/402); cameraAdjustOutputSize(resolution);
+    assert(resolution[0] == 2352 && resolution[1] == 1080);
+    setup(); // HID initialization must not erase display configuration.
+    _Alignas(16) unsigned char owner[0x240] = {0};
+    uintptr_t pointer = (uintptr_t)owner, vtable = cameraDisplay.base + 0x39023e0;
+    memcpy(component + 0x8b8, &pointer, sizeof pointer);
+    memcpy(owner + 0x170, &vtable, sizeof vtable);
+    float aspect = 16.f/9; memcpy(owner + 0x220, &aspect, sizeof aspect);
+    cameraApplyPlayerOrbit(NULL,NULL,component);
+    memcpy(&aspect,owner+0x220,sizeof aspect);
+    assert(fabsf(aspect - 2352.f/1080) < .00001f && (owner[0x178]&1));
+    // Dialogue can disable manual camera input while still using this display camera.
+    component[0x34] = 3; aspect = 16.f/9; memcpy(owner+0x220,&aspect,sizeof aspect);
+    cameraApplyPlayerOrbit(NULL,NULL,component);
+    memcpy(&aspect,owner+0x220,sizeof aspect);
+    assert(fabsf(aspect - 2352.f/1080) < .00001f && !cameraIsGameplayActive());
+    component[0x34] = 0;
+    // Only the live player's perspective object is accepted, never UI ortho.
+    vtable = cameraDisplay.base + 0x3902460; memcpy(owner+0x170,&vtable,sizeof vtable);
+    aspect = 16.f/9; memcpy(owner+0x220,&aspect,sizeof aspect);
+    cameraApplyPlayerOrbit(NULL,NULL,component);
+    memcpy(&aspect,owner+0x220,sizeof aspect); assert(aspect == 16.f/9);
+    cameraSetDisplayAspect(NAN); resolution[0]=1920;
+    cameraAdjustOutputSize(resolution); assert(resolution[0] == 1920);
+    cameraSetDisplayAspect(0); cameraDisplay.activeAspect = 0;
+}
 static void testBoundBridge(void) {
-    ZeldaCameraSharedState shared = {.magic = "CAM4", .version = 4};
-    cameraBindSharedState(&shared); assert(shared.callback != 0 && shared.ultrahandCallback != 0 && shared.selectionCallback != 0);
+    ZeldaCameraSharedState shared = {.magic = "CAM5", .version = 5};
+    cameraBindSharedState(&shared); assert(shared.callback != 0 && shared.ultrahandCallback != 0 && shared.selectionCallback != 0 && shared.resolutionCallback != 0);
     setup(); cameraAddMouseDelta(50, 20);
     ((void (*)(float *, float *, const void *))shared.callback)(orbit, &pitchState, component);
     assert(orbit[0] == 4.8f && orbit[2] < 30 && orbit[1] > 15);
-    ZeldaCameraSharedState old = {.magic = "CAM3", .version = 3};
+    ZeldaCameraSharedState old = {.magic = "CAM4", .version = 4};
     cameraBindSharedState(&old); assert(old.callback == 0);
 }
 int main(void) {
@@ -337,6 +366,6 @@ int main(void) {
     testTitleAndMovieGates(); testTransitionsDropQueuedInput();
     testPitchAndInvalidValues(); testLockKeepsNativeCamera();
     testNativeModesKeepLockAndDropMotion(); testNativeTargetLossAndEmptyHold();
-    testEquipmentAndMenuRouting(); testUltrahandOrbit(); testSelectionOrbit(); testUltrahandDetach(); testBoundBridge();
-    puts("PASS: native player orbit, unchanged arm, mouse/touch, lifecycle, transitions, lock, UltraHand selection/held states, CAM4 bridge");
+    testEquipmentAndMenuRouting(); testUltrahandOrbit(); testSelectionOrbit(); testUltrahandDetach(); testNativeDisplayAspect(); testBoundBridge();
+    puts("PASS: native player orbit, unchanged arm, mouse/touch, lifecycle, transitions, lock, UltraHand selection/held states, CAM5 bridge");
 }

@@ -80,11 +80,14 @@ bool cameraIsGameplayActive(void);
 bool cameraIsUltrahandActive(void);
 /// One bounded native right-stick shake, only while the held-object camera is active.
 bool cameraTriggerUltrahandDetach(void);
+/// Configure before guest startup. Zero keeps the original 16:9 output.
+void cameraSetDisplayAspect(float aspect);
+void cameraGetDisplaySize(float *width, float *height);
 
 /// 记录物理手柄正在输入（手柄最高优先级机制，避免键鼠与手柄冲突）
 void cameraNoteGamepadActivity(void);
 
-/// 绑定 CAM4 原生玩家相机回调页 (main+0x3ae4040)
+/// 绑定 CAM5 原生玩家相机回调页 (main+0x3ae4040)
 bool cameraBindSharedState(void *statePtr);
 
 /// 每帧清除失效的玩家相机输入；不会覆盖客体坐标。

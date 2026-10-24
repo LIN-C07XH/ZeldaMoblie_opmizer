@@ -50,7 +50,7 @@ static BOOL performance_expanded = NO;
 static NSLayoutConstraint *performance_width;
 static UIStackView *control_toolbar, *fallback_toolbar;
 static UIButton *retry_button, *control_mode_button, *confirm_button, *aspect_button, *detach_button;
-static _Atomic int selected_screen_aspect = ASPECT_MODE_FILL;
+static _Atomic int selected_screen_aspect = ASPECT_MODE_NATIVE_WIDE;
 int front_screen_aspect_mode(void) { return atomic_load(&selected_screen_aspect); }
 static BOOL full_touch_controller;
 static unsigned touch_controller_generation;
@@ -325,7 +325,7 @@ static void start_game(void) {
         lastSize = metal_layer.drawableSize; lastSafe = safe; lastMode = mode;
         fprintf(stderr, "IOS_VIEWPORT points=%.0fx%.0f pixels=%.0fx%.0f safe=%.0f,%.0f,%.0f,%.0f mode=%s\n",
             self.bounds.size.width, self.bounds.size.height, lastSize.width, lastSize.height,
-            safe.left, safe.top, safe.right, safe.bottom, mode == ASPECT_MODE_FILL ? "fill-crop" : "fit");
+            safe.left, safe.top, safe.right, safe.bottom, mode == ASPECT_MODE_NATIVE_WIDE ? "native-wide" : mode == ASPECT_MODE_FILL ? "fill-crop" : "fit");
     }
 }
 @end
@@ -395,9 +395,12 @@ static void start_game(void) {
     control_toolbar.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:control_toolbar];
     NSNumber *savedAspect = [NSUserDefaults.standardUserDefaults objectForKey:@"ZELDA_SCREEN_ASPECT_MODE"];
-    atomic_store(&selected_screen_aspect, savedAspect && savedAspect.intValue == ASPECT_MODE_FIT ? ASPECT_MODE_FIT : ASPECT_MODE_FILL);
+    atomic_store(&selected_screen_aspect, savedAspect && savedAspect.intValue == ASPECT_MODE_FIT ? ASPECT_MODE_FIT : ASPECT_MODE_NATIVE_WIDE);
+    CGSize display = self.view.bounds.size;
+    cameraSetDisplayAspect(front_screen_aspect_mode() == ASPECT_MODE_NATIVE_WIDE ?
+        (float)(MAX(display.width, display.height) / MAX(1, MIN(display.width, display.height))) : 0);
     NSArray *titles = @[@"确定", @"返回", @"地图", @"菜单", full_touch_controller ? @"手游模式" : @"虚拟手柄",
-        front_screen_aspect_mode() == ASPECT_MODE_FILL ? @"完整画面" : @"铺满屏幕"];
+        front_screen_aspect_mode() == ASPECT_MODE_NATIVE_WIDE ? @"原版比例" : @"宽屏视野"];
     const uint64_t masks[] = {PAD_BTN_A, PAD_BTN_B, PAD_BTN_MINUS, PAD_BTN_PLUS, 0, 0};
     for (unsigned i = 0; i < titles.count; i++) {
         UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
@@ -890,12 +893,23 @@ static void start_game(void) {
     if (mask && ![self.pressedActionButtons.allValues containsObject:mask]) inputTouchButton(mask.unsignedLongLongValue, false);
 }
 - (void)toggleScreenAspect:(UIButton *)button {
-    int mode = front_screen_aspect_mode() == ASPECT_MODE_FILL ? ASPECT_MODE_FIT : ASPECT_MODE_FILL;
-    atomic_store(&selected_screen_aspect, mode);
-    [NSUserDefaults.standardUserDefaults setInteger:mode forKey:@"ZELDA_SCREEN_ASPECT_MODE"];
-    [button setTitle:mode == ASPECT_MODE_FILL ? @"完整画面" : @"铺满屏幕" forState:UIControlStateNormal];
-    [self.view setNeedsLayout];
-    [self.nativePrompts setNeedsDisplay];
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSNumber *saved = [defaults objectForKey:@"ZELDA_SCREEN_ASPECT_MODE"];
+    int current = saved ? saved.intValue : front_screen_aspect_mode();
+    int mode = current == ASPECT_MODE_FIT ? ASPECT_MODE_NATIVE_WIDE : ASPECT_MODE_FIT;
+    [defaults setInteger:mode forKey:@"ZELDA_SCREEN_ASPECT_MODE"];
+    if (guest_running) {
+        [button setTitle:mode == ASPECT_MODE_NATIVE_WIDE ? @"重启宽屏" : @"重启原版" forState:UIControlStateNormal];
+        button.accessibilityHint = @"下次启动应用时生效";
+    } else {
+        atomic_store(&selected_screen_aspect, mode);
+        CGSize display = self.view.bounds.size;
+        cameraSetDisplayAspect(mode == ASPECT_MODE_NATIVE_WIDE ?
+            (float)(MAX(display.width, display.height) / MAX(1, MIN(display.width, display.height))) : 0);
+        [button setTitle:mode == ASPECT_MODE_NATIVE_WIDE ? @"原版比例" : @"宽屏视野" forState:UIControlStateNormal];
+        [self.view setNeedsLayout];
+        [self.nativePrompts setNeedsDisplay];
+    }
 }
 - (void)toggleTouchControls:(UIButton *)button {
     [self releaseAllActionButtons];

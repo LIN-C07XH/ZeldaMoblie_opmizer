@@ -66,7 +66,9 @@ extern int front_screen_aspect_mode(void);
 #else
     ScreenAspectMode mode = ASPECT_MODE_FIT;
 #endif
-    ScreenViewport viewport = screenAspectViewport(width, height, 1920, 1080, mode);
+    float imageWidth, imageHeight;
+    cameraGetDisplaySize(&imageWidth, &imageHeight);
+    ScreenViewport viewport = screenAspectViewport(width, height, imageWidth, imageHeight, mode);
     CGFloat gameWidth = viewport.width, gameHeight = viewport.height;
     CGFloat left = viewport.originX, top = viewport.originY;
     for (uint32_t i = 0; i < _prompts.count; i++) {

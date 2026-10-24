@@ -77,14 +77,14 @@
     "host/camera_controller.h": {
       "base": null,
       "overlay": {
-        "sha256": "618f3cb25652797298f62262efcac90b9796a5f328c3e9431dd8c00e7c8feb73",
+        "sha256": "21be887c1ca90b8e656b240d184dcf36a75a7abb8ec07e967f07ec12a6cb792c",
         "mode": 420
       }
     },
     "host/camera_controller.inc": {
       "base": null,
       "overlay": {
-        "sha256": "cf01028566539b466c82da21231904e827997833f65eb6741b63fe39782a118c",
+        "sha256": "20c33b4066a677c1e25e5ee4d45b993e1f8394962ae651bc18f0d8def473991f",
         "mode": 420
       }
     },
@@ -188,7 +188,7 @@
     "host/native_prompt_overlay.inc": {
       "base": null,
       "overlay": {
-        "sha256": "16cd07b5a7bca6111cf6a56f2fc0f96ed1faea8079f8c929e7b63391ccc35678",
+        "sha256": "0658a9b12988a2ffa8db2edb8921261a56dffd77205ed3eef7c8ec3a900b3553",
         "mode": 420
       }
     },
@@ -459,7 +459,7 @@
     "host/screen_aspect.h": {
       "base": null,
       "overlay": {
-        "sha256": "d2f095aabe3c8d66fd0ac224118802ade1b166ca1e5c57f366edb281c8c4b143",
+        "sha256": "e0b3c35c0200b547456d7fd5d685bf1a98d9532a16015259ffc542aff77dea14",
         "mode": 420
       }
     },
@@ -520,7 +520,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "f61fc49e331d6a37d599473144243772160bc9c9458023ac1cd3fc2f014f1619",
+        "sha256": "94f7668a77affa4baa441742766e7d982f0f70acfd32ecbc4bfa158279928753",
         "mode": 420
       }
     },
@@ -639,14 +639,14 @@
     "tests/test_camera_controller.c": {
       "base": null,
       "overlay": {
-        "sha256": "be1ad884a9810127ab95ed9e106be1840bbcffe77adf233a705e1d9091c5c802",
+        "sha256": "fffd102dc38ec418cc407e9bba651021d2806a1290360760b20d95a7497481b7",
         "mode": 420
       }
     },
     "tests/test_camera_hook.py": {
       "base": null,
       "overlay": {
-        "sha256": "265b475cfbcca04d8f6ab039535283fd175d54c3e5d08808b82116632bcf2655",
+        "sha256": "e1bd96988105b8df6d6d95e526e0b879a233bfb45ef8cc3bdec71e48bb76c12f",
         "mode": 420
       }
     },
@@ -784,7 +784,7 @@
     "tests/test_screen_aspect.c": {
       "base": null,
       "overlay": {
-        "sha256": "bad0e03cae380acea89befbfb143b67199004e1e6bf48247ab324f6153fb290f",
+        "sha256": "bd1ab7aeec34ba9a3a64313e35aa93df360c87fcf332801a6ba105d6ddec4a9c",
         "mode": 420
       }
     },
@@ -815,7 +815,7 @@
     "tools/camera_hook.py": {
       "base": null,
       "overlay": {
-        "sha256": "ac6d3d166079bf19447517b7aafc6b502cbe84d5f9032b093c24f6b275598323",
+        "sha256": "41ca04d69114e5bbc08eb87988c5a6ba924a034dbc5311a9c5a4bd94894e60e5",
         "mode": 420
       }
     },

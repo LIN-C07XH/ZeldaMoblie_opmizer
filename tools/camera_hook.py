@@ -12,7 +12,9 @@ import struct
 from game_timing import BUILD_ID, STATE_OFFSET
 
 CAMERA_STATE_OFFSET = STATE_OFFSET + 0x40
-MAGIC = b'CAM4\0\0\0\0'
+MAGIC = b'CAM5\0\0\0\0'
+RESOLUTION_SITE = 0x3dcbe0
+RESOLUTION_ORIGINAL = bytes.fromhex('a8273f29')  # stp w8,w9,[x29,#-8]: final size after native clamps
 ULTRAHAND_SITE = 0x23d7b70
 ULTRAHAND_ORIGINAL = bytes.fromhex('609a40bd')  # ldr s0,[x19,#0x98]
 ULTRAHAND_VTABLE = 0x3793ec0
@@ -25,6 +27,15 @@ LIFECYCLE_ORIGINAL = bytes.fromhex('890640f9')  # ldr x9,[x20,#8]
 ORIGINAL = bytes.fromhex('08c15839')  # ldrb w8,[x8,#0x630]
 # Independent anchors reject a coincidental byte match or changed call chain.
 ANCHORS = {
+    0x3de5f8: bytes.fromhex('091cd5393f0500710828d539'),
+    0x3dcbc0: bytes.fromhex('a8274329a12300d1e00313aae2031f2a9f02086b88b2881abf02096ba9b2891a'),
+    0x3dcbe4: bytes.fromhex('c2a61394'),
+    0x8c66ec: bytes.fromhex('08400091890180524a20299b2c344029'),
+    0x3de614: bytes.fromhex('894b01f029210d91287968f8'),
+    0x2d51358: struct.pack('<6I', 1280, 720, 1600, 900, 1920, 1080),
+    0x872a44: bytes.fromhex('081542f90a81049108c105912aa10ca9'),
+    0xc9300: bytes.fromhex('00b040bdc0035fd6'),  # PerspectiveProjection::getAspect
+    0x3902438: struct.pack('<Q', 0x27d5438),
     0x3793988: struct.pack('<Q', 0x23d2d40),  # SpecialPower vtable+0x120
     0x23d2d40: bytes.fromhex('ff0305d1'),  # sub sp,sp,#0x140
     0x23d2d6c: bytes.fromhex('fd830391'),  # add x29,sp,#0xe0
@@ -61,12 +72,12 @@ def apply_camera_hook(env):
     if env['BUILD_ID'] != BUILD_ID:
         raise ValueError('Camera hook requires the verified v1.4.3 main Build ID')
     image, emit, here = env['IMG'], env['emit'], env['here']
-    if CAMERA_STATE_OFFSET + 0x28 > env['PATCH_OFF'] or image[STATE_OFFSET:STATE_OFFSET + 8] != b'ZFPS143\0':
+    if CAMERA_STATE_OFFSET + 0x30 > env['PATCH_OFF'] or image[STATE_OFFSET:STATE_OFFSET + 8] != b'ZFPS143\0':
         raise ValueError('Camera hook needs the timing state page')
-    for offset, expected in {SITE: ORIGINAL, LIFECYCLE_SITE: LIFECYCLE_ORIGINAL, ULTRAHAND_SITE: ULTRAHAND_ORIGINAL, SELECTION_SITE: SELECTION_ORIGINAL, **ANCHORS}.items():
+    for offset, expected in {SITE: ORIGINAL, LIFECYCLE_SITE: LIFECYCLE_ORIGINAL, ULTRAHAND_SITE: ULTRAHAND_ORIGINAL, SELECTION_SITE: SELECTION_ORIGINAL, RESOLUTION_SITE: RESOLUTION_ORIGINAL, **ANCHORS}.items():
         if image[offset:offset + len(expected)] != expected:
             raise ValueError(f'Camera hook instruction mismatch at {offset:#x}')
-    image[CAMERA_STATE_OFFSET:CAMERA_STATE_OFFSET + 0x28] = MAGIC + struct.pack('<IIQQQ', 4, 0, 0, 0, 0)
+    image[CAMERA_STATE_OFFSET:CAMERA_STATE_OFFSET + 0x30] = MAGIC + struct.pack('<IIQQQQ', 5, 0, 0, 0, 0, 0)
     def pair(base, rt, rt2, offset, scale):
         return base | ((offset // scale & 127) << 15) | (rt2 << 10) | (31 << 5) | rt
 
@@ -74,8 +85,11 @@ def apply_camera_hook(env):
     for name, site, original, orbit_update in [("orbit", SITE, ORIGINAL, True),
             ("lifecycle", LIFECYCLE_SITE, LIFECYCLE_ORIGINAL, False),
             ("ultrahand", ULTRAHAND_SITE, ULTRAHAND_ORIGINAL, False),
-            ("selection", SELECTION_SITE, SELECTION_ORIGINAL, False)]:
+            ("selection", SELECTION_SITE, SELECTION_ORIGINAL, False),
+            ("resolution", RESOLUTION_SITE, RESOLUTION_ORIGINAL, False)]:
         start = here()
+        if name == "resolution":
+            emit(struct.unpack('<I', original)[0])  # native store precedes host adjustment
         # A mid-function call has more live state than an ABI function entry. Save
         # all vector registers, caller GPRs, LR, NZCV, FPCR and FPSR. Never use x18.
         emit(0xd10003ff | (0x300 << 10))  # sub sp,sp,#0x300
@@ -102,10 +116,12 @@ def apply_camera_hook(env):
             scope_skip = here(); emit(0)
         emit(env['ADRP'](16, here(), CAMERA_STATE_OFFSET))
         emit(0x91000210 | ((CAMERA_STATE_OFFSET & 0xfff) << 10))
-        emit(0xf9401210 if name == "selection" else 0xf9400e10 if ability_update else 0xf9400a10)
+        emit(0xf9401610 if name == "resolution" else 0xf9401210 if name == "selection" else 0xf9400e10 if ability_update else 0xf9400a10)
         skip = here()
         emit(0)
-        if ability_update:
+        if name == "resolution":
+            emit(0xaa0103e0)  # x0 = native output size, written by the displaced store
+        elif ability_update:
             emit(0xd10163a0)  # sub x0,x29,#0x58: native {radius,latitude,longitude}
             emit(0xaa1303e1)  # x1 = current ability camera execution
             # Same live owner -> PlayerCamera chain as UltraHand's native
@@ -119,7 +135,7 @@ def apply_camera_hook(env):
         else:
             emit(0xaa1f03e0)                 # x0 = NULL: observe player lifecycle only
             emit(0xaa1f03e1)                 # x1 = NULL
-        if not ability_update:
+        if not ability_update and name != "resolution":
             emit(0xaa1303e2)             # x2 = PlayerCamera component x19
         emit(0xd63f0200)                 # blr x16
         restore = here()
@@ -140,7 +156,7 @@ def apply_camera_hook(env):
         for reg in range(0, 18, 2):
             emit(pair(0xa9400000, reg, reg + 1, reg * 8, 8))
         emit(0x910003ff | (0x300 << 10))
-        emit(struct.unpack('<I', original)[0])
+        if name != "resolution": emit(struct.unpack('<I', original)[0])
         emit(env['B'](here(), site + 4))
         replacement = struct.pack('<I', env['B'](site, start))
         image[site:site + 4] = replacement
@@ -149,4 +165,5 @@ def apply_camera_hook(env):
                            reason='Native player camera ' + name))
         routines[name] = dict(offset=start, size=len(code), sha256=hashlib.sha256(code).hexdigest())
     return dict(state_offset=CAMERA_STATE_OFFSET, site=SITE, lifecycle_site=LIFECYCLE_SITE,
-                ultrahand_site=ULTRAHAND_SITE, selection_site=SELECTION_SITE, abi=4, writes=writes, routines=routines)
+                ultrahand_site=ULTRAHAND_SITE, selection_site=SELECTION_SITE, resolution_site=RESOLUTION_SITE,
+                abi=5, writes=writes, routines=routines)

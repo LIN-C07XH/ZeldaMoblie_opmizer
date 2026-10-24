@@ -51,16 +51,21 @@ static CameraState globalCameraState = {
                DEFAULT_ACCEL_FACTOR, 0, false, true, true}
 };
 
-// CAM4 keeps Chase, held-object UltraHand and selection callbacks independent.
+// CAM5 adds a native output-size callback, separate from player camera input.
 // The guest invokes this immutable callback synchronously on its camera thread.
 typedef struct {
     char magic[8];
     uint32_t version, reserved;
-    uintptr_t callback, ultrahandCallback, selectionCallback;
+    uintptr_t callback, ultrahandCallback, selectionCallback, resolutionCallback;
 } ZeldaCameraSharedState;
 _Static_assert(offsetof(ZeldaCameraSharedState, callback) == 0x10, "camera callback ABI");
 _Static_assert(offsetof(ZeldaCameraSharedState, selectionCallback) == 0x20, "selection callback ABI");
-_Static_assert(sizeof(ZeldaCameraSharedState) == 0x28, "camera bridge ABI");
+_Static_assert(sizeof(ZeldaCameraSharedState) == 0x30, "camera bridge ABI");
+static struct {
+    uintptr_t base;
+    float requestedAspect, activeAspect;
+    uint32_t width, height;
+} cameraDisplay;
 static struct {
     void *(*targetType)(void);
     const float *(*minimum)(void *), *(*maximum)(void *);
@@ -152,6 +157,70 @@ static bool cameraUltrahandActiveLocked(void) {
         cameraNow() - globalCameraState.lastUltrahandTick <= PLAYER_CAMERA_TIMEOUT;
 }
 
+void cameraSetDisplayAspect(float aspect) {
+    pthread_mutex_lock(&cameraLock);
+    cameraDisplay.requestedAspect = isfinite(aspect) && aspect > 16.f / 9 + .01f && aspect <= 3.6f ? aspect : 0;
+    pthread_mutex_unlock(&cameraLock);
+}
+
+void cameraGetDisplaySize(float *width, float *height) {
+    pthread_mutex_lock(&cameraLock);
+    *width = cameraDisplay.width ? cameraDisplay.width : 1920;
+    *height = cameraDisplay.height ? cameraDisplay.height : 1080;
+    pthread_mutex_unlock(&cameraLock);
+}
+
+static void cameraAdjustOutputSize(uint32_t *size) {
+    if (!size) return;
+    pthread_mutex_lock(&cameraLock);
+    uint32_t width = size[0], height = size[1];
+    if (cameraDisplay.requestedAspect && width >= 640 && width <= 4096 && height >= 480 && height <= 2160 &&
+        fabs((double)width / height - 16.0 / 9) < .01) {
+        double wanted = round(height * cameraDisplay.requestedAspect / 8) * 8;
+        if (wanted <= 4096) size[0] = (uint32_t)wanted;
+    }
+    cameraDisplay.width = size[0]; cameraDisplay.height = size[1];
+    cameraDisplay.activeAspect = cameraDisplay.requestedAspect && height && fabs((double)width / height - 16.0 / 9) < .01 ?
+        (float)size[0] / size[1] : 0;
+#ifndef UNIT_TEST
+    static uint64_t previous;
+    uint64_t dimensions = ((uint64_t)size[0] << 32) | size[1];
+    if (previous != dimensions) {
+        fprintf(stderr, "[DISPLAY_NATIVE] output=%ux%u original=%ux%u requested=%.5f active=%.5f\n",
+            size[0], size[1], width, height, cameraDisplay.requestedAspect, cameraDisplay.activeAspect);
+        previous = dimensions;
+    }
+#endif
+    pthread_mutex_unlock(&cameraLock);
+}
+
+// PlayerCamera's own perspective projection. UI orthographic projections,
+// shadows, reflection cameras and their matrices are never written here.
+static void cameraApplyDisplayAspectLocked(const void *component) {
+    if (!cameraDisplay.activeAspect) return;
+    uintptr_t owner, vtable;
+    memcpy(&owner, (const char *)component + 0x8b8, sizeof owner); // native state+0x428
+    if (!owner) return;
+    char *projection = (char *)owner + 0x170; // verified by ExecutePlayerCameraBase::initialize
+    memcpy(&vtable, projection, sizeof vtable);
+    if (vtable != cameraDisplay.base + 0x39023e0) return;
+    float aspect;
+    memcpy(&aspect, projection + 0xb0, sizeof aspect); // native getAspect at 0xc9300
+    if (!isfinite(aspect) || aspect < .5f || aspect > 4) return;
+    if (fabsf(aspect - cameraDisplay.activeAspect) > .00001f) {
+        memcpy(projection + 0xb0, &cameraDisplay.activeAspect, sizeof aspect);
+        projection[8] |= 1; // native projection-dirty flag; let the engine rebuild it
+#ifndef UNIT_TEST
+        static double reported;
+        if (cameraNow() - reported > 5) {
+            reported = cameraNow();
+            fprintf(stderr, "[DISPLAY_CAMERA] player perspective aspect %.5f -> %.5f; vertical FOV unchanged\n",
+                aspect, cameraDisplay.activeAspect);
+        }
+#endif
+    }
+}
+
 // v1.4.3 ExecutePlayerCameraChase, BEFORE its requested pose reaches collision.
 // orbit = {native distance, elevation degrees, azimuth degrees}. This is NOT a
 // view matrix and none of these coordinates are copied across host frames.
@@ -168,6 +237,7 @@ static void cameraApplyPlayerOrbit(float *orbit, float *pitchState, const void *
     double now = cameraNow();
     if (orbitUpdate) cameraDiagnostics.chase++; else cameraDiagnostics.lifecycle++;
     bool valid = target && !(flags & 3) && !zelda_is_movie();
+    if (!orbitUpdate && target && !zelda_is_movie()) cameraApplyDisplayAspectLocked(component);
     if (orbitUpdate) valid = valid && isfinite(orbit[0]) && orbit[0] > 0 && orbit[0] < 500 &&
         isfinite(orbit[1]) && isfinite(orbit[2]) && isfinite(*pitchState);
     static int trace = -1;
@@ -437,18 +507,20 @@ static void cameraApplySelectionOrbit(float *orbit, void *execution, const void 
 bool cameraBindSharedState(void *statePtr) {
     if (!statePtr) return false;
     ZeldaCameraSharedState *state = statePtr;
-    if (memcmp(state->magic, "CAM4\0\0\0\0", 8) || state->version != 4) {
+    if (memcmp(state->magic, "CAM5\0\0\0\0", 8) || state->version != 5) {
         fprintf(stderr, "[CAMERA_HOOK] incompatible bridge; rebuild patched modules\n");
         return false;
     }
     uintptr_t base = (uintptr_t)statePtr - 0x3ae4040;
+    cameraDisplay.base = base;
     cameraTargetApi.targetType = (void *)(base + 0x18a4c0c);
     cameraTargetApi.minimum = (void *)(base + 0x18a9544);
     cameraTargetApi.maximum = (void *)(base + 0x18a9598);
     __atomic_store_n(&state->callback, (uintptr_t)cameraApplyPlayerOrbit, __ATOMIC_RELEASE);
     __atomic_store_n(&state->ultrahandCallback, (uintptr_t)cameraApplyUltrahandOrbit, __ATOMIC_RELEASE);
     __atomic_store_n(&state->selectionCallback, (uintptr_t)cameraApplySelectionOrbit, __ATOMIC_RELEASE);
-    fprintf(stderr, "[CAMERA_BRIDGE] CAM4 selection + held-object UltraHand; routing diagnostics v2\n");
+    __atomic_store_n(&state->resolutionCallback, (uintptr_t)cameraAdjustOutputSize, __ATOMIC_RELEASE);
+    fprintf(stderr, "[CAMERA_BRIDGE] CAM5 native output aspect + player orbit\n");
     return true;
 }
 
