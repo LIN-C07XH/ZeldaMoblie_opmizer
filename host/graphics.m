@@ -519,7 +519,7 @@ void front_run(void (*guest)(void)) {
         [[NSRunLoop currentRunLoop] addTimer:promptTimer forMode:NSRunLoopCommonModes];
 
         // 构建 UltraCam 风格 PC 键鼠实时悬浮 HUD 指南 (置于右上角，避免遮挡左下角控制面板)
-        CGFloat hudW = 270, hudH = 320;
+        CGFloat hudW = 270, hudH = 336;
         NSRect hudFrame = NSMakeRect(window.contentView.bounds.size.width - hudW - 16,
                                      window.contentView.bounds.size.height - hudH - 16,
                                      hudW, hudH);
@@ -553,6 +553,7 @@ void front_run(void (*guest)(void)) {
             @"Shift    : 疾跑 / 冲刺闪避 (B)\n"
             @"E 键     : 调查/拾取/对话/骑马 (A)\n"
             @"Q 键     : 究极手技能轮盘 (L)\n"
+            @"G 键     : 究极手拆解装配\n"
             @"C / Ctrl : 潜行蹲下 (L3)\n"
             @"Tab / M  : 开启地图 (Minus)\n"
             @"1/2/3/4  : 武器/盾牌/材料/口哨\n"

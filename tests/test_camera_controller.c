@@ -273,6 +273,56 @@ static void testSelectionOrbit(void) {
     cameraAddMouseDelta(10, 0); tick(); unchanged(distance,25,55);
     assert(!globalCameraState.selectionAnglesOwned);
 }
+static void testUltrahandDetach(void) {
+    setup(); assert(!cameraTriggerUltrahandDetach()); // no shake on title/Chase/selection
+    _Alignas(16) unsigned char execution[0x380] = {0};
+    void *vtable[] = {(void *)ultraParameter}; void **container = vtable;
+    void *parameterContainer = &container;
+    memcpy(execution + 0x28, &parameterContainer, sizeof parameterContainer);
+    cameraTargetApi.targetType = ultraType;
+    cameraTargetApi.minimum = ultraLow; cameraTargetApi.maximum = ultraHigh;
+    *(float *)(execution + 0xa4) = 15; *(float *)(execution + 0xa8) = 30;
+    cameraApplyUltrahandOrbit(orbit, execution, component);
+    assert(cameraTriggerUltrahandDetach());
+    assert(!cameraTriggerUltrahandDetach()); // repeated clicks cannot extend a gesture
+    int32_t x, y;
+    for (int phase = 1; phase <= DETACH_SWING_COUNT + 1; phase++) {
+        for (int read = 0; read < 20; read++) {
+            assert(cameraPoll(&x, &y));
+            assert(x == (phase > DETACH_SWING_COUNT ? 0 : phase & 1 ? 32767 : -32767));
+            assert(y == 0); // read frequency cannot change phase duration
+        }
+        testTime += .101;
+        orbit[1] = 18; orbit[2] = 35; // native stick camera would otherwise sway
+        cameraApplyUltrahandOrbit(orbit, execution, component);
+        unchanged(4.8f,15,30);
+    }
+    assert(cameraPoll(&x, &y) && x == 0 && y == 0);
+    assert(!cameraPoll(&x, &y));
+    CameraConfig config = cameraGetConfig(); config.nativeUltrahand = false; cameraSetConfig(&config);
+    assert(cameraTriggerUltrahandDetach());
+    for (int phase = 1; phase <= 3; phase++) {
+        assert(cameraPoll(&x, &y) && x == (phase & 1 ? 32767 : -32767) && y == 0);
+        testTime += .101;
+        cameraApplyUltrahandOrbit(orbit, execution, component);
+    }
+    config.nativeUltrahand = true; cameraSetConfig(&config);
+    assert(!cameraPoll(&x, &y)); // changing the control setting cancels the gesture
+    cameraSetRightStickMode(true); assert(!cameraTriggerUltrahandDetach());
+    cameraSetRightStickMode(false);
+    assert(cameraTriggerUltrahandDetach()); cameraNoteGamepadActivity();
+    assert(!cameraPoll(&x, &y) && !x && !y);
+    assert(cameraTriggerUltrahandDetach()); cameraSetMouseCaptured(false);
+    assert(!cameraPoll(&x, &y) && !x && !y);
+    assert(cameraTriggerUltrahandDetach()); movie = true;
+    assert(!cameraPoll(&x, &y) && !x && !y); movie = false;
+    cameraApplyUltrahandOrbit(orbit, execution, component);
+    assert(cameraTriggerUltrahandDetach()); tick(); // leaving the held-object execution
+    assert(!cameraPoll(&x, &y) && !x && !y);
+    cameraApplyUltrahandOrbit(orbit, execution, component);
+    assert(cameraTriggerUltrahandDetach()); testTime += .2;
+    assert(!cameraPoll(&x, &y) && !x && !y); // no stale pulses in menus
+}
 static void testBoundBridge(void) {
     ZeldaCameraSharedState shared = {.magic = "CAM4", .version = 4};
     cameraBindSharedState(&shared); assert(shared.callback != 0 && shared.ultrahandCallback != 0 && shared.selectionCallback != 0);
@@ -287,6 +337,6 @@ int main(void) {
     testTitleAndMovieGates(); testTransitionsDropQueuedInput();
     testPitchAndInvalidValues(); testLockKeepsNativeCamera();
     testNativeModesKeepLockAndDropMotion(); testNativeTargetLossAndEmptyHold();
-    testEquipmentAndMenuRouting(); testUltrahandOrbit(); testSelectionOrbit(); testBoundBridge();
+    testEquipmentAndMenuRouting(); testUltrahandOrbit(); testSelectionOrbit(); testUltrahandDetach(); testBoundBridge();
     puts("PASS: native player orbit, unchanged arm, mouse/touch, lifecycle, transitions, lock, UltraHand selection/held states, CAM4 bridge");
 }

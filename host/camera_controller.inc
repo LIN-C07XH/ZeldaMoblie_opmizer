@@ -17,6 +17,8 @@
 #define ANGLE_RADIAN_SCALE 0.0022f
 #define MAX_PITCH_LIMIT 1.45f
 #define PLAYER_CAMERA_TIMEOUT 0.15
+#define DETACH_PHASE_SECONDS 0.10
+#define DETACH_SWING_COUNT 6
 
 typedef struct {
     bool mouseCaptured, isTargetLocked, isLockDragKeyDown, lockHasSwitchedInPress, lockWasActiveInPress;
@@ -34,6 +36,8 @@ typedef struct {
     bool selectionAnglesOwned;
     const void *selectionExecution;
     float selectionPitch, selectionYaw;
+    unsigned detachPhase;
+    double detachPhaseAt, detachStartedAt;
     const void *playerCamera;
     uintptr_t playerTarget;
     double pendingYaw, pendingPitch;
@@ -113,6 +117,7 @@ static void cameraReportRoutingLocked(void) {
 }
 
 static void cameraDiscardInputLocked(void) {
+    globalCameraState.detachPhase = 0;
     globalCameraState.ultrahandAnglesOwned = false;
     globalCameraState.selectionAnglesOwned = false;
     globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
@@ -140,6 +145,11 @@ static bool cameraGameplayActiveLocked(void) {
         cameraNow() - globalCameraState.lastPlayerTick <= PLAYER_CAMERA_TIMEOUT;
     if (!active) cameraDiscardInputLocked();
     return active;
+}
+
+static bool cameraUltrahandActiveLocked(void) {
+    return cameraGameplayActiveLocked() && globalCameraState.orbitMode == 2 &&
+        cameraNow() - globalCameraState.lastUltrahandTick <= PLAYER_CAMERA_TIMEOUT;
 }
 
 // v1.4.3 ExecutePlayerCameraChase, BEFORE its requested pose reaches collision.
@@ -202,6 +212,7 @@ static void cameraApplyPlayerOrbit(float *orbit, float *pitchState, const void *
     }
     globalCameraState.lastOrbitTick = now;
     globalCameraState.orbitMode = 1;
+    globalCameraState.detachPhase = 0;
     if (globalCameraState.ultrahandAnglesOwned) cameraDiagnostics.chaseReleases++;
     globalCameraState.ultrahandAnglesOwned = false;
     globalCameraState.selectionAnglesOwned = false;
@@ -275,9 +286,12 @@ static void cameraApplyUltrahandOrbit(float *orbit, void *execution, const void 
     float *yawBaseline = (float *)((char *)execution + 0xb8);
     float *yawOffset = (float *)((char *)execution + 0xbc);
     valid = valid && isfinite(*pitch) && isfinite(*yaw) && isfinite(*yawBaseline) && isfinite(*yawOffset);
-    bool continuous = globalCameraState.playerCamera == component && globalCameraState.playerTarget == target &&
-        now - globalCameraState.lastOrbitTick <= PLAYER_CAMERA_TIMEOUT && globalCameraState.orbitMode == 2 &&
+    bool sameExecution = globalCameraState.playerCamera == component && globalCameraState.playerTarget == target &&
+        now - globalCameraState.lastUltrahandTick <= PLAYER_CAMERA_TIMEOUT && globalCameraState.orbitMode == 2 &&
         globalCameraState.ultrahandExecution == execution;
+    bool continuous = sameExecution && now - globalCameraState.lastOrbitTick <= PLAYER_CAMERA_TIMEOUT;
+    if (!active || !sameExecution || globalCameraState.rightStickOnly || globalCameraState.isTargetLocked)
+        globalCameraState.detachPhase = 0;
     cameraDiagnostics.reject = (!active ? 1u : 0) | (!limits ? 2u : 0) | (!valid ? 4u : 0) |
         (!continuous ? 8u : 0) | (!globalCameraState.config.nativeUltrahand ? 16u : 0) |
         (globalCameraState.rightStickOnly ? 32u : 0) | (globalCameraState.isTargetLocked ? 64u : 0);
@@ -329,6 +343,10 @@ static void cameraApplyUltrahandOrbit(float *orbit, void *execution, const void 
         *yawOffset = (float)remainder(newYaw - *yawBaseline, 360);
     }
     if (valid) {
+        if (!globalCameraState.ultrahandAnglesOwned) {
+            globalCameraState.ultrahandPitch = orbit[1];
+            globalCameraState.ultrahandYaw = orbit[2];
+        }
         globalCameraState.currentPitch = orbit[1] * (float)(M_PI / 180);
         globalCameraState.currentYaw = orbit[2] * (float)(M_PI / 180);
         globalCameraState.targetDistance = orbit[0];
@@ -379,6 +397,7 @@ static void cameraApplySelectionOrbit(float *orbit, void *execution, const void 
         globalCameraState.selectionAnglesOwned = false;
     }
     globalCameraState.orbitMode = 3;
+    globalCameraState.detachPhase = 0;
     globalCameraState.ultrahandAnglesOwned = false;
     globalCameraState.selectionExecution = execution;
     globalCameraState.playerCamera = component;
@@ -523,6 +542,28 @@ bool cameraPoll(int32_t *outRx, int32_t *outRy) {
     if (!outRx || !outRy) return false;
     pthread_mutex_lock(&cameraLock);
     *outRx = *outRy = 0;
+    if (globalCameraState.detachPhase) {
+        double now = cameraNow();
+        if (!cameraUltrahandActiveLocked() || globalCameraState.rightStickOnly ||
+            globalCameraState.isTargetLocked || now - globalCameraState.detachStartedAt > 2) {
+            globalCameraState.detachPhase = 0;
+        } else {
+            // Multiple HID reads in a frame return the same phase. Advance at
+            // most once per sample so a stall cannot skip every reversal.
+            if (now - globalCameraState.detachPhaseAt >= DETACH_PHASE_SECONDS) {
+                globalCameraState.detachPhase++;
+                globalCameraState.detachPhaseAt = now;
+            }
+            if (globalCameraState.detachPhase <= DETACH_SWING_COUNT)
+                *outRx = globalCameraState.detachPhase & 1 ? 32767 : -32767;
+            else if (globalCameraState.detachPhase > DETACH_SWING_COUNT + 1)
+                globalCameraState.detachPhase = 0;
+            // Include a full neutral phase and clear queued stick movement.
+            globalCameraState.stickX = globalCameraState.stickY = 0;
+            pthread_mutex_unlock(&cameraLock);
+            return true;
+        }
+    }
     if (!cameraNativeOrbitLocked() && cameraNow() - globalCameraState.stickTick <= .075 &&
         (globalCameraState.stickX || globalCameraState.stickY)) {
         *outRx = (int32_t)(fmaxf(-1, fminf(1, globalCameraState.stickX / 18)) * 32767);
@@ -545,6 +586,7 @@ bool cameraPoll(int32_t *outRx, int32_t *outRy) {
 void cameraSetMouseCaptured(bool captured) {
     pthread_mutex_lock(&cameraLock);
     globalCameraState.mouseCaptured = captured;
+    globalCameraState.detachPhase = 0;
     globalCameraState.ultrahandAnglesOwned = false;
     globalCameraState.selectionAnglesOwned = false;
     globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
@@ -562,6 +604,7 @@ bool cameraIsMouseCaptured(void) {
 void cameraToggleMouseCapture(void) {
     pthread_mutex_lock(&cameraLock);
     globalCameraState.mouseCaptured = !globalCameraState.mouseCaptured;
+    globalCameraState.detachPhase = 0;
     globalCameraState.ultrahandAnglesOwned = false;
     globalCameraState.selectionAnglesOwned = false;
     globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
@@ -659,6 +702,7 @@ void cameraSetRightStickMode(bool enabled) {
         globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
         globalCameraState.stickX = globalCameraState.stickY = 0;
         globalCameraState.rightStickOnly = enabled;
+        globalCameraState.detachPhase = 0;
         globalCameraState.ultrahandAnglesOwned = false;
         globalCameraState.selectionAnglesOwned = false;
     }
@@ -680,6 +724,7 @@ void cameraSetConfig(const CameraConfig *newConfig) {
         isfinite(newConfig->accelerationFactor) && newConfig->accelerationFactor >= 0 && newConfig->accelerationFactor <= 1)
     {
         if (globalCameraState.config.nativeUltrahand != newConfig->nativeUltrahand) {
+            globalCameraState.detachPhase = 0;
             globalCameraState.ultrahandAnglesOwned = false;
             globalCameraState.selectionAnglesOwned = false;
             globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
@@ -707,10 +752,27 @@ bool cameraIsGameplayActive(void) {
 
 bool cameraIsUltrahandActive(void) {
     pthread_mutex_lock(&cameraLock);
-    bool active = cameraGameplayActiveLocked() && globalCameraState.orbitMode == 2 &&
-        cameraNow() - globalCameraState.lastUltrahandTick <= PLAYER_CAMERA_TIMEOUT;
+    bool active = cameraUltrahandActiveLocked();
     pthread_mutex_unlock(&cameraLock);
     return active;
+}
+
+bool cameraTriggerUltrahandDetach(void) {
+    pthread_mutex_lock(&cameraLock);
+    bool allowed = cameraUltrahandActiveLocked() && !globalCameraState.rightStickOnly &&
+        !globalCameraState.isTargetLocked && !globalCameraState.detachPhase;
+    if (allowed) {
+        globalCameraState.detachPhase = 1;
+        globalCameraState.detachStartedAt = globalCameraState.detachPhaseAt = cameraNow();
+        globalCameraState.pendingYaw = globalCameraState.pendingPitch = 0;
+        globalCameraState.stickX = globalCameraState.stickY = 0;
+        // In direct-view mode the synthetic stick is only for the game's
+        // detach gesture. Keep the latest native/user angles through it.
+        if (globalCameraState.config.nativeUltrahand && globalCameraState.lastOrbitTick > 0)
+            globalCameraState.ultrahandAnglesOwned = true;
+    }
+    pthread_mutex_unlock(&cameraLock);
+    return allowed;
 }
 
 void cameraNoteGamepadActivity(void) { cameraReset(); }

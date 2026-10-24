@@ -73,6 +73,7 @@ void input_key(unsigned code, int pressed) {
     if (code >= sizeof keys) return;
     if (pressed) inputNoteDevice(INPUT_DEVICE_KEYBOARD_MOUSE);
     pthread_mutex_lock(&input_lock);
+    if (code == 5 && pressed && !keys[code]) cameraTriggerUltrahandDetach(); // G: detach held assembly
     if (pressed && !keys[code]) for (unsigned i = 0; i < sizeof mapping / sizeof *mapping; i++)
         if (mapping[i].key == code) {
             latched_buttons |= mapping[i].button;

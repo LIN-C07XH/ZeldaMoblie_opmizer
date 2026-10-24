@@ -78,6 +78,8 @@ void cameraSetGameplayActive(bool active);
 /// 查询当前是否真正处于可控 3D 游玩状态中
 bool cameraIsGameplayActive(void);
 bool cameraIsUltrahandActive(void);
+/// One bounded native right-stick shake, only while the held-object camera is active.
+bool cameraTriggerUltrahandDetach(void);
 
 /// 记录物理手柄正在输入（手柄最高优先级机制，避免键鼠与手柄冲突）
 void cameraNoteGamepadActivity(void);

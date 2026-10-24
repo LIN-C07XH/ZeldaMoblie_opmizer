@@ -48,7 +48,7 @@ static UIButton *cloudFolderButton;
 static BOOL performance_expanded = NO;
 static NSLayoutConstraint *performance_width;
 static UIStackView *control_toolbar, *fallback_toolbar;
-static UIButton *retry_button, *control_mode_button, *confirm_button, *aspect_button;
+static UIButton *retry_button, *control_mode_button, *confirm_button, *aspect_button, *detach_button;
 static _Atomic int selected_screen_aspect = ASPECT_MODE_FILL;
 int front_screen_aspect_mode(void) { return atomic_load(&selected_screen_aspect); }
 static BOOL full_touch_controller;
@@ -423,6 +423,17 @@ static void start_game(void) {
         }
         [fallback_toolbar addArrangedSubview:button];
     }
+    detach_button = [UIButton buttonWithType:UIButtonTypeCustom];
+    [detach_button setTitle:@"拆解" forState:UIControlStateNormal];
+    detach_button.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    detach_button.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:.65];
+    detach_button.layer.cornerRadius = 8;
+    detach_button.accessibilityHint = @"晃动右摇杆，拆下究极手抓住的装配部件";
+    [detach_button.widthAnchor constraintEqualToConstant:44].active = YES;
+    [detach_button.heightAnchor constraintEqualToConstant:44].active = YES;
+    [detach_button addTarget:self action:@selector(detachUltrahandObject:) forControlEvents:UIControlEventTouchUpInside];
+    detach_button.hidden = YES;
+    [fallback_toolbar addArrangedSubview:detach_button];
     [NSLayoutConstraint activateConstraints:@[
         [fallback_toolbar.centerXAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.centerXAnchor],
         [fallback_toolbar.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8]]];
@@ -629,6 +640,10 @@ static void start_game(void) {
     fallback_toolbar.hidden = !guest_running;
     for (UIButton *button in fallback_toolbar.arrangedSubviews) {
         button.enabled = guest_running;
+        if (button == detach_button) {
+            button.hidden = full_touch_controller || !ultrahand || inputGetDevice() == INPUT_DEVICE_GAMEPAD;
+            continue;
+        }
         button.hidden = !full_touch_controller && !(button.tag & (PAD_BTN_D_LEFT | PAD_BTN_D_RIGHT | PAD_BTN_D_UP));
     }
     performance_width.constant = performance_expanded ? MIN(260, MAX(130, size.width - safe.left - safe.right - 420)) : 130;
@@ -735,6 +750,13 @@ static void start_game(void) {
             inputTouchButton(btn.padButton, true);
         }
     }
+}
+
+- (void)detachUltrahandObject:(UIButton *)sender {
+    (void)sender;
+    if (!guest_running || full_touch_controller) return;
+    inputNoteDevice(INPUT_DEVICE_TOUCH);
+    cameraTriggerUltrahandDetach();
 }
 
 - (void)onActionButtonUp:(UIButton *)sender {

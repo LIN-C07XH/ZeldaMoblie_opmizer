@@ -77,14 +77,14 @@
     "host/camera_controller.h": {
       "base": null,
       "overlay": {
-        "sha256": "8eaac54cfc365b82327ca68c4a9313c929eec15b88bc3d7938417e56033d1c69",
+        "sha256": "618f3cb25652797298f62262efcac90b9796a5f328c3e9431dd8c00e7c8feb73",
         "mode": 420
       }
     },
     "host/camera_controller.inc": {
       "base": null,
       "overlay": {
-        "sha256": "5ab8d68b6fff125cd2c2d9911b19749ca79e25fd214592e0627cc4b7c8041e65",
+        "sha256": "cf01028566539b466c82da21231904e827997833f65eb6741b63fe39782a118c",
         "mode": 420
       }
     },
@@ -161,7 +161,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "35413bfb267c1d5d57e0dc504979f3fcf7a2d1a1e18509322453a831658c9eeb",
+        "sha256": "84c64c7d07ac0d5c3f874b63a41830cb46fb8fc987b26e22d98073785c24daf4",
         "mode": 420
       }
     },
@@ -171,7 +171,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "c7740f572a230f3e875fb74189febb63c171bdade5fbffac8b8c34c3086ee231",
+        "sha256": "e09bce19c8c5234c26b027d5521b5df0b23529cf9c43dfd5a102a5c89f095e9a",
         "mode": 420
       }
     },
@@ -520,7 +520,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "d24ab4afe2250e0cdb287190d755f03111f5cd2898efd893860114e14f0d045f",
+        "sha256": "e0957b2a45307be1f0c70f1f531e659d29d6d40c1ae677f1b8b9e39b71807a09",
         "mode": 420
       }
     },
@@ -639,7 +639,7 @@
     "tests/test_camera_controller.c": {
       "base": null,
       "overlay": {
-        "sha256": "626dcddfd50e2c4978c976e1f389fd1e8f9f113c6f7de90c0afb0f4f667aadf9",
+        "sha256": "be1ad884a9810127ab95ed9e106be1840bbcffe77adf233a705e1d9091c5c802",
         "mode": 420
       }
     },
@@ -791,7 +791,7 @@
     "tests/test_touch_input.c": {
       "base": null,
       "overlay": {
-        "sha256": "493daab0ff36b76259bbe34ebaa5715e8f90a1101461b7351ab17cd4fb4b7e2b",
+        "sha256": "99b54f6425be621ed817e795d259bcf9f5746a032ce205d1596a51e2b3bf463e",
         "mode": 420
       }
     },

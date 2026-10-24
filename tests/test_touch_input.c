@@ -48,5 +48,7 @@ int main(void) {
     assert((state.buttons & (1u<<7)) && state.rx > 0);
     input_key(15, false); assert(!sample().rx);
     inputScrollEquipment(1); assert(!sample().buttons);
+    input_key(5, true); input_key(5, true); input_key(5, false); state=sample();
+    assert(!state.buttons && !state.rx && !state.ry); // G has no unrelated native button mapping
     puts("Touch input: title confirmation, four axes, pulses, independent sources, clearing and controller priority passed");
 }
