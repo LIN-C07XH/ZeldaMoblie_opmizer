@@ -6,7 +6,7 @@ source script/ios_config.sh
 ios_configure
 mkdir -p work/ios work/logs/ios work/tmp
 export TMPDIR="$PWD/work/tmp/"
-bundle=${ZELDA_IOS_BUNDLE:-local.zelda-mobile.ios}
+bundle=${ZELDA_IOS_BUNDLE:-org.zeldamobile.optimizer.ios}
 app="$ios_build_dir/Release-iphoneos/ZeldaMobile.app"
 case "${1:-build}" in
 build)

@@ -64,8 +64,8 @@ cat > "$app/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleIdentifier</key><string>local.zelda-mobile</string>
-<key>CFBundleName</key><string>Zelda-Mobile</string>
+<key>CFBundleIdentifier</key><string>org.zeldamobile.optimizer</string>
+<key>CFBundleName</key><string>ZeldaMoblie_opmizer</string>
 <key>CFBundleExecutable</key><string>launch</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>NSHighResolutionCapable</key><true/>

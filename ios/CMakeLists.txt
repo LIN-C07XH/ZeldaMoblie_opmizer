@@ -26,7 +26,7 @@ set(GEN "${ROOT}/work/build")
 set(IOS_WORK "${ROOT}/work/ios")
 set(ZELDA_IOS_DEPS_PREFIX "${IOS_WORK}/deps/install-ios${CMAKE_OSX_DEPLOYMENT_TARGET}" CACHE PATH "iOS codec installation")
 set(VPX "${ZELDA_IOS_DEPS_PREFIX}")
-set(ZELDA_IOS_BUNDLE "local.zelda-mobile.ios" CACHE STRING "Development bundle identifier")
+set(ZELDA_IOS_BUNDLE "org.zeldamobile.optimizer.ios" CACHE STRING "Development bundle identifier")
 add_executable(ZeldaMobile MACOSX_BUNDLE
   main.m cloud_save_sync.m "${IOS_WORK}/embed.S"
   "${HOST}/probe.c" "${HOST}/codec.c" "${HOST}/kernel.c" "${HOST}/threads.c"

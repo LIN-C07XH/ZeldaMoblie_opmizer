@@ -48,11 +48,13 @@ Instead of crudely emulating gamepad joysticks or tolerating unoptimized mobile 
   - A/B directory atomic rotation, content hashing, and historical version backups to prevent corrupted saves or overwrites.
   - Real-time write-lock conflict detection.
 
-#### 6. Metal 3 & Apple Silicon Performance Optimization
-* **Binary Archive & Pipeline Cache Overhaul**: Resolves the severe macOS 15 memory spike issue where expanding massive pipeline caches consumed several gigabytes of RAM and caused prolonged startup freezes. Implements size limits (8 MiB cap) and asynchronous utility queue serialization.
-* **Shader IR Preheating & Metal Toolchain Integration**: Pre-compiles Metal 3.0 / Metal 4 shading language libraries, offline scene variants, and video interfaces (`nv12decode` / `texture_gamma`) on Mac, drastically reducing stuttering during real-time gameplay.
-* **Audio ADPCM Memory Boundary Fix**: Completely resolves random crashes caused by ADPCM chunk alignment and unmapped buffer page overflows on iOS/iPadOS.
-* **Native Pixel-Aligned Widescreen**: Adjusts logical viewports, camera projection, and UI canvases to fit modern bezel-less Apple displays (e.g., iPhone 15/16 Pro, iPad Pro) with exact aspect ratios and zero distortion.
+#### 6. Native Metal 4 Architecture & Metal 3 Performance Optimization
+* **Native Metal 4 Core**: The project is natively engineered on and optimized for **Metal 4**, leveraging modern unified memory architectures and Apple's latest graphics pipelines for maximum throughput.
+* **Extensive Metal 3 Downward Compatibility**: For legacy devices and operating systems (macOS 14/15, iOS 17/18, Xcode 15/16), the project integrates a robust backward-compatible Metal 3 path (`ZELDA_IOS_METAL=3` / `DM_NVN_M3=1`) that resolves critical platform flaws:
+  - **Binary Archive & Pipeline Cache Overhaul**: Resolves the severe macOS 15 memory spike issue where expanding massive pipeline caches consumed several gigabytes of RAM and caused prolonged startup freezes. Implements size limits (8 MiB cap) and asynchronous utility queue serialization.
+  - **Shader IR Preheating & Metal Toolchain Integration**: Pre-compiles Metal 3.0 / Metal 4 shading language libraries, offline scene variants, and video interfaces (`nv12decode` / `texture_gamma`) on Mac, drastically reducing stuttering during real-time gameplay.
+  - **Audio ADPCM Memory Boundary Fix**: Completely resolves random crashes caused by ADPCM chunk alignment and unmapped buffer page overflows on iOS/iPadOS.
+  - **Native Pixel-Aligned Widescreen**: Adjusts logical viewports, camera projection, and UI canvases to fit modern bezel-less Apple displays (e.g., iPhone 15/16 Pro, iPad Pro) with exact aspect ratios and zero distortion.
 
 ---
 
@@ -68,10 +70,10 @@ This repository acts as an **incremental overlay patch** over the upstream base 
 
 ### System & Hardware Requirements
 
-| Platform | Minimum Hardware | Operating System | Build / Runtime Dependencies |
+| Platform | Recommended (Native Metal 4) | Downward Compatibility (Metal 3) | Build & Development Toolchain |
 | :--- | :--- | :--- | :--- |
-| **Mac** | Apple Silicon (M1 / M2 / M3 / M4 family) | macOS 14 (Sonoma) or macOS 15 (Sequoia) | Xcode 15 / 16 (Command Line Tools & Metal Toolchain), Python 3.9+, Homebrew (`cmake`, `pkg-config`, `opus`, `libvpx`) |
-| **iOS / iPadOS** | Metal 3 compatible Apple Silicon / Bionic (A17 Pro, A18, M1–M4) | iOS / iPadOS 17.0+ (iOS 18+ recommended) | Deployed via Mac with Xcode 16 + iOS 18 SDK (`ZELDA_IOS_METAL=3`) |
+| **Mac** | **macOS 26 (Metal 4)**, Apple Silicon | macOS 14 (Sonoma) / macOS 15 (Sequoia) | **Xcode 26 (Recommended)** or Xcode 15/16 (Command Line Tools & Metal Toolchain), Python 3.9+, Homebrew (`cmake`, `pkg-config`, `opus`, `libvpx`) |
+| **iOS / iPadOS** | **iOS / iPadOS 26.0+ (Metal 4)** | iOS / iPadOS 17.0+ (`ZELDA_IOS_METAL=3`) | Deployed via Mac with Xcode 26 (or Xcode 16 + iOS 18 SDK) |
 | **Game Assets** | Legally dumped *The Legend of Zelda: Tears of the Kingdom* | **v1.4.3** Update (`.nsp` / `.nsz`) | Matched `prod.keys` (minimum 60 GB free disk space recommended) |
 
 ---
@@ -178,11 +180,13 @@ ZELDA_IOS_METAL=3 ./script/ios.sh build
   - 采用 A/B 目录原子替换与内容 SHA-256 校验，自动在本地保留多版本备份（`work/cloud-save-backups/`）。
   - 具备并发写锁检测，防止两端同时修改造成数据覆盖。
 
-#### 6. Metal 3 / Apple Silicon 深度运行与性能优化
-* **管线缓存与内存暴涨修复**：彻底修复 macOS 15 在启动时展开庞大管线缓存造成消耗数 GiB 内存并导致系统长时间卡顿的严重缺陷；引入 8 MiB 智能限额、后台 Utility 串行队列捕获与异步预热。
-* **Metal IR 预编译与着色器预热**：支持在 Mac 上通过 Metal Toolchain 离线预编译 Metal 3.0 / Metal 4 着色器 IR，打包 `nv12decode` 与 `texture_gamma` 视频解码接口组合及场景变体，显著消灭真机游玩过程中的编译掉帧。
-* **音频 ADPCM 内存边界越界修复**：彻底修复 iPad / iPhone 运行过程中由于 ADPCM 块对齐与未映射内存页读取导致的随机闪退问题。
-* **原生像素级等比宽屏**：针对全面屏 iPhone（如 iPhone 15/16 Pro）及 iPad 屏幕比例，动态调整渲染视口、相机投射与 UI 原生画布，等比呈现无画面拉伸与无畸变黑边。
+#### 6. 原生 Metal 4 架构与 Metal 3 兼容性能优化
+* **原生 Metal 4 核心开发**：本项目原生基于 **Metal 4** 统一图形计算架构设计开发，默认启用 Metal 4 指令管线与现代统一内存模型，全面释放 Apple 最新一代芯片的极致算力。
+* **深度向下兼容优化（Metal 3 模式）**：为处于旧版本生态（macOS 14/15、iOS 17/18、Xcode 15/16）的设备提供了专属的向下兼容层（`ZELDA_IOS_METAL=3` 或 `DM_NVN_M3=1`），并解决了一系列底层核心缺陷：
+  - **管线缓存与内存暴涨修复**：彻底修复 macOS 15 在启动时展开庞大管线缓存造成消耗数 GiB 内存并导致系统长时间卡顿的严重缺陷；引入 8 MiB 智能限额、后台 Utility 串行队列捕获与异步预热。
+  - **Metal IR 预编译与着色器预热**：支持在 Mac 上通过 Metal Toolchain 离线预编译 Metal 3.0 / Metal 4 着色器 IR，打包 `nv12decode` 与 `texture_gamma` 视频解码接口组合及场景变体，显著消灭真机游玩过程中的编译掉帧。
+  - **音频 ADPCM 内存边界越界修复**：彻底修复 iPad / iPhone 运行过程中由于 ADPCM 块对齐与未映射内存页读取导致的随机闪退问题。
+  - **原生像素级等比宽屏**：针对全面屏 iPhone（如 iPhone 15/16 Pro）及 iPad 屏幕比例，动态调整渲染视口、相机投射与 UI 原生画布，等比呈现无画面拉伸与无畸变黑边。
 
 ---
 
@@ -199,10 +203,10 @@ ZELDA_IOS_METAL=3 ./script/ios.sh build
 
 ### 软硬件环境要求
 
-| 运行平台 | 最低硬件配置 | 系统版本要求 | 构建与开发依赖 |
+| 运行平台 | 推荐环境（原生 Metal 4） | 向下兼容支持（Metal 3 模式） | 构建与开发依赖 |
 | :--- | :--- | :--- | :--- |
-| **Mac 电脑** | Apple Silicon 芯片（M1 / M2 / M3 / M4 系列） | macOS 14 (Sonoma) 或 macOS 15 (Sequoia) | Xcode 15 / 16（含 Command Line Tools 与 Metal Toolchain 组件）、Python 3.9+、Homebrew（`cmake`, `pkg-config`, `opus`, `libvpx`） |
-| **iOS / iPadOS** | 搭载 A17 Pro、A18 及 M 系列芯片的 Metal 3 兼容设备 | iOS / iPadOS 17.0+（推荐 iOS 18+） | 需通过 Mac 电脑使用 Xcode 16 及 iOS 18 SDK 构建（设置 `ZELDA_IOS_METAL=3`） |
+| **Mac 电脑** | **macOS 26**（Apple Silicon） | macOS 14 (Sonoma) / macOS 15 (Sequoia) | **Xcode 26（官方推荐）** 或 Xcode 15/16（含 Command Line Tools 与 Metal Toolchain）、Python 3.9+、Homebrew（`cmake`, `pkg-config`, `opus`, `libvpx`） |
+| **iOS / iPadOS** | **iOS / iPadOS 26.0+** | iOS / iPadOS 17.0+（设置 `ZELDA_IOS_METAL=3`） | 需通过 Mac 电脑使用 Xcode 26（或 Xcode 16 + iOS 18 SDK）构建 |
 | **游戏与资源** | 合法持有的 Nintendo Switch《塞尔达传说：王国之泪》本体 | **v1.4.3** 更新补丁（`.nsp` / `.nsz`） | 匹配且合法的 `prod.keys`（项目所在磁盘建议保留 60 GB 以上可用空间） |
 
 ---

@@ -11,7 +11,7 @@ python3 - "$app/Info.plist" <<'PY'
 import plistlib
 import sys
 with open(sys.argv[1], 'wb') as out:
-    plistlib.dump(dict(CFBundleIdentifier='local.totk.touch-controls-tests',
+    plistlib.dump(dict(CFBundleIdentifier='org.zeldamobile.optimizer.touchtests',
         CFBundleExecutable='TouchControlsTests', CFBundleName='TouchControlsTests',
         CFBundlePackageType='APPL', CFBundleVersion='1', CFBundleShortVersionString='1',
         UILaunchScreen={}, UISupportedInterfaceOrientations=['UIInterfaceOrientationLandscapeLeft']), out)
