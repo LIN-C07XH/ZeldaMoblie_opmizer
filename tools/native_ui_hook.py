@@ -14,13 +14,23 @@ MAGIC = b'ZUI143\0\0'
 ICON_SITE = 0xba2a18
 FRAME_SITE = 0x217b838
 DRAW_SITE = 0x1485f0
+LAYOUT_DRAW_SITE = 0x10c7190
 ICON_RETURN = 0xba2a58
 ORIGINAL = {
     ICON_SITE: bytes.fromhex('885b01d0'),  # adrp x8,0x3714000 (relocated on replay)
     FRAME_SITE: bytes.fromhex('ff4301d1'), # sub sp,sp,#0x50
     DRAW_SITE: bytes.fromhex('08604139'),  # ldrb w8,[x0,#0x58]
+    LAYOUT_DRAW_SITE: bytes.fromhex('fd7bbda9'), # Layout::Draw: x1 is the live DrawInfo, before SetLayout invalidation
 }
 ANCHORS = {
+    0x10c7188: bytes.fromhex('080c40f9c80200b4'), # native root-pane guard
+    0x10c7194: bytes.fromhex('f50b00f9f44f02a9fd030091'),
+    0x10c71a0: bytes.fromhex('f50300aaf30301aae00301aae10315aa'),
+    0x10c71b4: bytes.fromhex('a7150094'), # SetLayout invalidates per-layout draw state after projection adjustment
+    0x10cc850: bytes.fromhex('280080521fc800f91f30037908300639016000f9'),
+    0x391ae68: struct.pack('<Q', 0x28fa6d0), # observed native UI DrawInfo vtable
+    0x39714a0: struct.pack('<Q', 0x391ae58),
+    0x873198: bytes.fromhex('608600ad628e01ad'), # native projection matrix at DrawInfo+0x10
     0x357fbe0: struct.pack('<Q', DRAW_SITE), # Picture::Draw inherited from Pane
     0x357f8e0: struct.pack('<Q', DRAW_SITE), # TextBox::Draw inherited from Pane
     0x1485f4: bytes.fromhex('291080523f01286a'), # visible + calculated-matrix gate
@@ -72,7 +82,7 @@ def apply_native_ui_hook(env):
         for reg in range(0, 18, 2): emit(pair(0xa9400000, reg, reg + 1, reg * 8, 8))
         emit(0x910003ff | (0x300 << 10))
 
-    for kind, site in [(1, ICON_SITE), (2, FRAME_SITE), (3, DRAW_SITE)]:
+    for kind, site in [(1, ICON_SITE), (2, FRAME_SITE), (3, DRAW_SITE), (4, LAYOUT_DRAW_SITE)]:
         start = here()
         if kind == 3:
             # Read only a live Pane::Draw argument. Preserve flags and scratch
@@ -106,6 +116,8 @@ def apply_native_ui_hook(env):
         if kind == 1:
             emit(0xaa0103e2) # x2=effective key (option swap already resolved)
             emit(0xaa1303e1) # x1=native output span, x19
+        elif kind == 4:
+            emit(0xaa1f03e2) # x1 is already the live DrawInfo; no retained layout pointer
         else:
             emit(0xaa0003e1) # x1=live UIScreen
             emit(0xaa1f03e2)
@@ -118,14 +130,14 @@ def apply_native_ui_hook(env):
         for reg in range(0, 32, 2): emit(pair(0xad400000, reg, reg + 1, 0xc0 + reg * 16, 16))
         for msr, slot in [(0xd51b4211, 0x98), (0xd51b4411, 0xa0), (0xd51b4431, 0xa8)]:
             emit(0xf94003f1 | ((slot // 8) << 10)); emit(msr)
-        if kind != 2:
+        if kind in (1, 3):
             emit(0xf9405bf0) # handled?
             handled = here(); emit(0)
         restore_gpr()
         if kind == 1: emit(env['ADRP'](8, here(), 0x3714000))
         else: emit(struct.unpack('<I', ORIGINAL[site])[0])
         emit(env['B'](here(), site + 4))
-        if kind != 2:
+        if kind in (1, 3):
             success = here()
             struct.pack_into('<I', env['patch'], handled - env['PATCH_OFF'],
                              0xb5000010 | (((success - handled) // 4) << 5))

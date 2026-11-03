@@ -1,6 +1,14 @@
 static p_render_enable z_render = {.enabled = 1};
 static uint64_t z_predicate_hits, z_predicate_waits, z_predicate_prefetched;
 #if DM_NVN_M3
+static int zeldaM3PredicateAsyncEnabled(void) {
+    static int asyncEnabled = -1;
+    if (asyncEnabled < 0) {
+        const char *val = getenv("ZELDA_M3_PREDICATE_ASYNC");
+        asyncEnabled = val ? atoi(val) != 0 : 1;
+    }
+    return asyncEnabled;
+}
 static int zelda_m3_predicate_reuse_enabled(void) {
     static int reuse = -1;
     if (reuse < 0) { const char *value = getenv("ZELDA_M3_PREDICATE_REUSE"); reuse = !value || atoi(value); }
@@ -20,7 +28,7 @@ static void zelda_predicate_store(uint64_t address, const uint64_t words[4]) {
     if (!canonical) return;
     unsigned i;
     for (i = 0; i < z_predicate_count; i++) if (z_predicate_cache[i].source == canonical) break;
-    if (i == z_predicate_count) { if (z_predicate_count == 64) return; z_predicate_count++; }
+    if (i == z_predicate_count) { if (z_predicate_count == ZELDA_PREDICATE_CACHE_CAPACITY) return; z_predicate_count++; }
     z_predicate_cache[i].source = canonical;
     memcpy(z_predicate_cache[i].words, words, 32);
     z_predicate_cache[i].valid = 3;
@@ -31,6 +39,21 @@ static int zelda_render_enabled(void) {
 #if DM_NVN_M3
     int found = zelda_m3_predicate_reuse_enabled() ? zelda_predicate_find(z_render.address) : -1;
     if (found >= 0) { z_predicate_hits++; return nvn_render_test(&z_render, z_predicate_cache[found].words); }
+    if (zeldaM3PredicateAsyncEnabled()) {
+        void *bufferPtr = NULL;
+        uint64_t bufferOffset = 0;
+        if (mtl_addr(z_render.address, 32, &bufferPtr, &bufferOffset)) {
+            const void *contents = [(__bridge id<MTLBuffer>)bufferPtr contents];
+            if (contents) {
+                uint64_t counters[4];
+                memcpy(counters, (const uint8_t *)contents + bufferOffset, sizeof counters);
+                int enabled = nvn_render_test(&z_render, counters);
+                zelda_predicate_store(z_render.address, counters);
+                return enabled;
+            }
+        }
+        return 1;
+    }
 #endif
     // Unsupported draws and clear formats retain the CPU fallback.
     uint64_t fence = mtl_sub_commit();

@@ -1,5 +1,6 @@
 #import "cloud_save_sync.h"
 #import <CommonCrypto/CommonDigest.h>
+#include <TargetConditionals.h>
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -55,14 +56,30 @@ BOOL cloudSaveSyncIsConfigured(void) {
 }
 BOOL cloudSaveSyncSetFolderURL(NSURL *url) {
     if (!url.isFileURL) return NO;
+    NSString *folderPath = url.URLByResolvingSymlinksInPath.path.stringByStandardizingPath;
+    NSString *savePath;
+    @synchronized(CloudSaveOperation.class) { savePath = localPath.stringByStandardizingPath; }
+    if (!savePath.length) return NO;
+    savePath = [NSURL fileURLWithPath:savePath].URLByResolvingSymlinksInPath.path;
+    // A sync root must never contain the live save, or be contained by it.
+    if (!savePath.length || [folderPath isEqual:savePath] ||
+        [folderPath hasPrefix:[savePath stringByAppendingString:@"/"]] ||
+        [savePath hasPrefix:[folderPath stringByAppendingString:@"/"]]) return NO;
     BOOL scoped = [url startAccessingSecurityScopedResource];
     NSNumber *directory;
     NSError *error;
     BOOL isDirectory = [url getResourceValue:&directory forKey:NSURLIsDirectoryKey error:&error] && directory.boolValue;
-    NSData *data = isDirectory ? [url bookmarkDataWithOptions:NSURLBookmarkCreationMinimalBookmark
+    NSURLBookmarkCreationOptions options = NSURLBookmarkCreationMinimalBookmark;
+#if !TARGET_OS_IPHONE
+    options = NSURLBookmarkCreationWithSecurityScope;
+#endif
+    NSData *data = isDirectory ? [url bookmarkDataWithOptions:options
         includingResourceValuesForKeys:nil relativeToURL:nil error:&error] : nil;
     if (scoped) [url stopAccessingSecurityScopedResource];
-    if (!data) return NO;
+    if (!data) {
+        NSLog(@"CLOUD_SYNC bookmark_failed domain=%@ code=%ld", error.domain, (long)error.code);
+        return NO;
+    }
     cloudSaveSyncCancel();
     [NSUserDefaults.standardUserDefaults setObject:data forKey:CLOUD_SAVE_BOOKMARK_KEY];
     return YES;
@@ -74,7 +91,11 @@ void cloudSaveSyncClearBookmark(void) {
 static NSURL *resolve(NSData *bookmark) {
     if (!bookmark.length) return nil;
     BOOL stale;
-    return [NSURL URLByResolvingBookmarkData:bookmark options:NSURLBookmarkResolutionWithoutUI
+    NSURLBookmarkResolutionOptions options = NSURLBookmarkResolutionWithoutUI;
+#if !TARGET_OS_IPHONE
+    options |= NSURLBookmarkResolutionWithSecurityScope;
+#endif
+    return [NSURL URLByResolvingBookmarkData:bookmark options:options
         relativeToURL:nil bookmarkDataIsStale:&stale error:nil];
 }
 NSURL *cloudSaveSyncResolveFolderURL(void) {

@@ -1,3 +1,4 @@
+#include "ios_pipeline_cache.inc"
 #include "shader_status.h"
 static void zelda_depth_clear_encode(void) {
 #if !DM_NVN_M3
@@ -16,7 +17,7 @@ static void zelda_depth_clear_encode(void) {
         d.vertexFunction = [z_query_library newFunctionWithName:@"depth_clear_vertex"];
         for (int i = 0; i < 8; i++) { d.colorAttachments[i].pixelFormat = formats[i]; d.colorAttachments[i].writeMask = MTLColorWriteMaskNone; }
         d.depthAttachmentPixelFormat = formats[8]; d.stencilAttachmentPixelFormat = formats[9];
-        NSError *error = nil; pipeline = ZELDA_SHADER_BUILD([g_dev newRenderPipelineStateWithDescriptor:d error:&error]);
+        NSError *error = nil; pipeline = ZELDA_SHADER_BUILD(cachedRenderPipeline(g_dev, d, &error));
         if (!pipeline) MDIE("Inline depth clear pipeline failed: %s", error.localizedDescription.UTF8String);
         pipelines[key] = pipeline;
     }

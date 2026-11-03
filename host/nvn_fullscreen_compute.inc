@@ -1,3 +1,4 @@
+#include "ios_pipeline_cache.inc"
 #include "shader_status.h"
 #if DM_NVN_M3
 static int zelda_fsc_draw(id pr, const p_draw *dw, const p_draw_idx *di) {
@@ -560,7 +561,7 @@ static id<MTLComputePipelineState> zelda_fsc_clear_pipeline(void) {
     static id<MTLComputePipelineState> pipeline; static int failed;
     if (!pipeline && !failed) {
         NSError *error = nil; id<MTLFunction> f = [ZELDA_SHADER_BUILD([g_dev newLibraryWithSource:zelda_fsc_clear_msl options:nil error:&error]) newFunctionWithName:@"zfc_clear"];
-        pipeline = f ? ZELDA_SHADER_BUILD([g_dev newComputePipelineStateWithFunction:f error:&error]) : nil;
+        pipeline = f ? ZELDA_SHADER_BUILD(cachedComputePipeline(g_dev, f, &error)) : nil;
         if (!pipeline) { failed = 1; MLOG("ERROR: FSC clear kernel: %s", error.localizedDescription.UTF8String); }
     }
     return pipeline;
@@ -626,8 +627,8 @@ static ZfcKernel *zelda_fsc_kernel(NvShader *vs, NvShader *fs, unsigned colors, 
             // The kernels read the draw's own argument buffers, so their layouts must be the shaders' layouts.
             if (vf && ff && (!vnb || [vf newArgumentEncoderWithBufferIndex:vabi].encodedLength == vlen) &&
                 (!fnb || [ff newArgumentEncoderWithBufferIndex:fabi].encodedLength == flen)) {
-                vp = ZELDA_SHADER_BUILD([g_dev newComputePipelineStateWithFunction:vf error:&error]);
-                fp = vp ? ZELDA_SHADER_BUILD([g_dev newComputePipelineStateWithFunction:ff error:&error]) : nil;
+                vp = ZELDA_SHADER_BUILD(cachedComputePipeline(g_dev, vf, &error));
+                fp = vp ? ZELDA_SHADER_BUILD(cachedComputePipeline(g_dev, ff, &error)) : nil;
             }
         }
         k->vertex = vp; k->fragment = fp; k->implicit = implicit;
@@ -827,7 +828,7 @@ static void zelda_fsc_after_pass(void) {
     }
     if (!z_fsc_compare) {
         NSError *error = nil; id<MTLFunction> f = [ZELDA_SHADER_BUILD([g_dev newLibraryWithSource:zelda_fsc_compare_msl options:nil error:&error]) newFunctionWithName:@"zfc_compare"];
-        z_fsc_compare = f ? ZELDA_SHADER_BUILD([g_dev newComputePipelineStateWithFunction:f error:&error]) : nil;
+        z_fsc_compare = f ? ZELDA_SHADER_BUILD(cachedComputePipeline(g_dev, f, &error)) : nil;
         z_fsc_results = [g_dev newBufferWithLength:ZFC_CHECK_RECORDS * 32 options:MTLResourceStorageModeShared]; res_add(z_fsc_results);
         if (!z_fsc_compare) MDIE("FSC compare kernel: %s", error.localizedDescription.UTF8String);
     }

@@ -4,6 +4,7 @@ cd "$(dirname "$0")/.."
 mkdir -p work/tmp
 export TMPDIR="$PWD/work/tmp/"
 export PYTHONDONTWRITEBYTECODE=1
+export ZELDA_PIPELINE_CACHE=0
 trap 'rm -f work/tmp/test_screen_aspect work/tmp/test_touch_input work/tmp/test_cloud_save_sync work/tmp/test_haptic_routing work/tmp/test_nvn_texture_swizzle work/tmp/test_nvn_point_params work/tmp/test_nvn_shader_warm work/tmp/test_trace_writer work/tmp/trace-writer-test.tsv work/tmp/test_nvn_encoder_state work/tmp/test_nvn_texture_writeback work/tmp/test_nvn_depth_output work/tmp/test_nvn_fullscreen_compute work/tmp/test_nvn_pass_writes work/tmp/test_settings work/tmp/test_settings.json work/tmp/test_font_watch work/tmp/test_vibration work/tmp/test_gamepad_haptics work/tmp/test_movie work/tmp/test_movie_video work/tmp/test_shader_prep work/tmp/test_relr work/tmp/test_kernel work/tmp/test_services work/tmp/test_audio work/tmp/test_threads work/tmp/test_display work/tmp/test_performance work/tmp/test_nvn_objects work/tmp/test_nvn_index work/tmp/test_nvn_index_cache work/tmp/test_nvn_uniform_snapshot work/tmp/test_nvn_inline_uniform work/tmp/test_nvn_cube_pass work/tmp/test_nvn_wide_line work/tmp/test_nvn_conditional_draw work/tmp/test_nvn_framebuffer_fetch work/tmp/test_nvn_color_clear work/tmp/test_nvn_pointer_storage work/tmp/test_nvn_query work/tmp/test_nvn_depth work/tmp/test_nvn_profile work/tmp/test_nvn_profile.tsv work/tmp/test_nvn_render_view work/tmp/test_nvn_math work/tmp/test_nvn_residency work/tmp/test_nvn_c1_storage work/tmp/test_nvn_small_texture work/tmp/test_nvn_dirty work/tmp/test_nvn_pool_index work/tmp/test_nvn_upload_pool work/tmp/test_nvn_texture_reuse work/tmp/test_nvn_texture_alias work/tmp/test_filesystem work/tmp/point-size-test.metal; rm -rf work/tmp/test_audio.dSYM work/tmp/test_nvn_inline_uniform.dSYM' EXIT
 clang -O1 -Wall -Wextra -Werror -fsanitize=address,undefined tests/test_trace_writer.c -o work/tmp/test_trace_writer
 work/tmp/test_trace_writer
@@ -81,11 +82,11 @@ clang -O2 -Wall -Wextra -Werror -fobjc-arc -ivfsoverlay work/build/graphics-over
 MTL_DEBUG_LAYER=1 work/tmp/test_nvn_pointer_storage
 clang -O2 -Wall -Wextra -Werror -fobjc-arc tests/test_nvn_math.m -framework Foundation -framework Metal -o work/tmp/test_nvn_math
 MTL_DEBUG_LAYER=1 work/tmp/test_nvn_math tests/fixtures/invariant_math.metal
-clang -O2 -Wall -Wextra -Werror -fobjc-arc -ivfsoverlay work/build/graphics-overlay.json \
+clang -O2 -Wall -Wextra -Werror -Wno-deprecated-declarations -fobjc-arc -ivfsoverlay work/build/graphics-overlay.json \
     -I "$PWD/core/gfx/nvn" tests/test_shader_prep.m host/performance.c host/shader_prep.m \
     -framework Cocoa -framework QuartzCore -framework Metal -o work/tmp/test_shader_prep
 MTL_DEBUG_LAYER=1 work/tmp/test_shader_prep
-clang -Wall -Wextra -Werror -fobjc-arc -I "$PWD/core/gfx/nvn" -I "$PWD/core/gfx/nvn/include" \
+clang -Wall -Wextra -Werror -fobjc-arc -I "$PWD/work/build" -I "$PWD/core/gfx/nvn" -I "$PWD/core/gfx/nvn/include" \
     tests/test_nvn_shader_warm.m host/performance.c -framework Foundation -framework Metal -o work/tmp/test_nvn_shader_warm
 MTL_DEBUG_LAYER=1 ZELDA_WARM_ATTACHMENT_VARIANTS=1 work/tmp/test_nvn_shader_warm
 MTL_DEBUG_LAYER=1 ZELDA_WARM_ATTACHMENT_VARIANTS=2 work/tmp/test_nvn_shader_warm
@@ -142,7 +143,7 @@ clang -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined tests/test_audio
 work/tmp/test_audio
 clang -Wall -Wextra -Werror -Wno-deprecated-declarations -fobjc-arc -fsanitize=address,undefined \
     -ivfsoverlay work/build/graphics-overlay.json -I "$PWD/core/gfx/nvn" \
-    -I "$PWD/core/host" tests/test_display.c tests/runtime_stubs.c host/trace_writer.c host/graphics.m host/shader_prep.m host/input.c host/vibration.c host/input_script.c host/timeline.c host/gamepad.m host/performance.c host/game_timing.c host/settings.m host/kernel.c host/threads.c \
+    -I "$PWD/core/host" tests/test_display.c tests/runtime_stubs.c host/trace_writer.c host/graphics.m ios/cloud_save_sync.m host/filesystem.c host/shader_prep.m host/input.c host/vibration.c host/input_script.c host/timeline.c host/gamepad.m host/performance.c host/game_timing.c host/settings.m host/kernel.c host/threads.c \
     -framework Cocoa -framework QuartzCore -framework CoreVideo -framework Metal -framework GameController -framework CoreHaptics -o work/tmp/test_display
 work/tmp/test_display
 clang -Wall -Wextra -Werror -fobjc-arc -fsanitize=address,undefined -I host tests/test_settings.m host/settings.m -framework Foundation -o work/tmp/test_settings

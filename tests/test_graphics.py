@@ -1158,7 +1158,7 @@ int main(void) { @autoreleasepool {
         self.assertIn('!zelda_fetch_record_key(c[1])', warm)
         self.assertIn('variants.allValues', warm)
         self.assertLess(warm.index('if (done++) return;'), warm.index('@autoreleasepool {'))
-        self.assertNotIn('g_shcache[', warm[warm.index('dispatch_apply(count'):warm.index('unsigned shaders = 0;')])
+        self.assertNotIn('g_shcache[', warm[warm.index('applyShaderWarmup(count'):warm.index('unsigned shaders = 0;')])
         launcher = (ROOT / 'script/build_and_run.sh').read_text()
         self.assertEqual(launcher.count('DM_PSO_USER=${DM_PSO_USER:-"$PWD/work/shaders/pso_user.tsv"}'), 2)
 

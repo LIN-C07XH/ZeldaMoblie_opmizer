@@ -20,6 +20,19 @@ static MTLViewport zelda_present_viewport(double dw, double dh, double cw, doubl
     MTLViewport vp = {rect.originX, rect.originY, rect.width, rect.height, 0, 1};
     if (mode == ASPECT_MODE_FIT && fabs((dw/dh)/(cw/ch)-1) < .01)
         vp = (MTLViewport){0,0,dw,dh,0,1};
+#if TARGET_OS_IPHONE
+    static double reportAt;
+    static unsigned long frames, changes;
+    static double lastWidth, lastHeight;
+    frames++;
+    if (cw != lastWidth || ch != lastHeight) { changes++; lastWidth=cw; lastHeight=ch; }
+    double now = CACurrentMediaTime();
+    if (now >= reportAt) {
+        reportAt=now+1;
+        fprintf(stderr,"[DISPLAY_PRESENT] frames=%lu changes=%lu mode=%d source=%.0fx%.0f drawable=%.0fx%.0f viewport=%.0f,%.0f %.0fx%.0f\n",
+            frames,changes,mode,cw,ch,dw,dh,vp.originX,vp.originY,vp.width,vp.height);
+    }
+#endif
     return vp;
 }
 static _Atomic int z_scale_mode;

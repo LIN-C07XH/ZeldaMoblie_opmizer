@@ -51,17 +51,25 @@ class IOSConfigTests(unittest.TestCase):
 
     def test_install_selects_the_matching_app(self):
         with tempfile.TemporaryDirectory() as temp:
+            fixtureRoot = Path(temp).resolve() / 'project'
+            (fixtureRoot / 'script').mkdir(parents=True)
+            (fixtureRoot / 'work/venv/bin').mkdir(parents=True)
+            for scriptName in ('ios.sh', 'ios_config.sh'):
+                (fixtureRoot / 'script' / scriptName).write_bytes((ROOT / 'script' / scriptName).read_bytes())
+            validator = fixtureRoot / 'work/venv/bin/python'
+            validator.write_text('#!/bin/sh\nexit 0\n')
+            validator.chmod(0o755)
             executable = Path(temp) / 'xcrun'
             executable.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
             executable.chmod(0o755)
             environment = dict(os.environ, ZELDA_IOS_METAL='3',
                                ZELDA_IOS_DEPLOYMENT_TARGET='17.0',
                                ZELDA_IOS_DEVICE='test-device', PATH=temp + ':' + os.environ['PATH'])
-            result = subprocess.run(['bash', 'script/ios.sh', 'install'], cwd=ROOT,
+            result = subprocess.run(['bash', 'script/ios.sh', 'install'], cwd=fixtureRoot,
                                     env=environment, text=True, capture_output=True, check=True)
             self.assertEqual(result.stdout.splitlines(), ['devicectl', 'device', 'install', 'app',
                              '--device', 'test-device',
-                             str(ROOT / 'work/ios/build-metal3-ios17.0/Release-iphoneos/ZeldaMobile.app')])
+                             str(fixtureRoot / 'work/ios/build-metal3-ios17.0/Release-iphoneos/ZeldaMobile.app')])
 
 
 if __name__ == '__main__':

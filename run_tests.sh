@@ -4,10 +4,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR="${1:-$SCRIPT_DIR/../totk-mobile}"
 TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/camera-tests.XXXXXX")"
 trap 'rm -rf "$TEST_DIR"' EXIT
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s "$SCRIPT_DIR/tests" -p test_overlay_package.py -v
+PYTHONDONTWRITEBYTECODE=1 "$TARGET_DIR/work/venv/bin/python" -m unittest discover -s "$SCRIPT_DIR/tests" -p test_overlay_package.py -v
+PYTHONDONTWRITEBYTECODE=1 "$TARGET_DIR/work/venv/bin/python" -m unittest discover -s "$TARGET_DIR/tests" -p test_ios_shader_ir.py -v
+PYTHONDONTWRITEBYTECODE=1 "$TARGET_DIR/work/venv/bin/python" -m unittest discover -s "$TARGET_DIR/tests" -p test_desktop_updates.py -v
+clang -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -I "$TARGET_DIR/host" \
+    "$SCRIPT_DIR/tests/test_audio.c" -framework AudioToolbox -o "$TEST_DIR/audio"
+"$TEST_DIR/audio"
+clang -O1 -g -Wall -Wextra -Werror -fobjc-arc -fsanitize=address,undefined \
+    "$SCRIPT_DIR/tests/test_ios_shader_cache.m" -framework Foundation -lz -o "$TEST_DIR/shader_cache"
+"$TEST_DIR/shader_cache"
 clang -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -I "$SCRIPT_DIR/host" \
     "$SCRIPT_DIR/tests/test_camera_controller.c" -o "$TEST_DIR/camera"
 "$TEST_DIR/camera"
+clang -Wall -Wextra -Werror -I "$SCRIPT_DIR/host" -I "$SCRIPT_DIR/ios" "$SCRIPT_DIR/tests/test_tablet_touch_layout.c" -o "$TEST_DIR/tablet_layout"
+"$TEST_DIR/tablet_layout"
 clang -I "$SCRIPT_DIR/host" "$SCRIPT_DIR/tests/test_action_layout.c" -o "$TEST_DIR/layout"
 "$TEST_DIR/layout"
 clang -Wall -Wextra -Werror -fsanitize=address,undefined -I "$SCRIPT_DIR/host" \
@@ -41,6 +51,8 @@ clang -Wall -Wextra -Werror -fobjc-arc -fsanitize=address,undefined -I "$SCRIPT_
 "$TEST_DIR/cloud_save"
 PYTHONPATH="$TARGET_DIR/script${PYTHONPATH:+:$PYTHONPATH}" PYTHONDONTWRITEBYTECODE=1 \
     "$TARGET_DIR/work/venv/bin/python" -m unittest discover -s "$SCRIPT_DIR/tests" -p test_ios_shader_support.py -v
+PYTHONPATH="$TARGET_DIR/script${PYTHONPATH:+:$PYTHONPATH}" PYTHONDONTWRITEBYTECODE=1 \
+    "$TARGET_DIR/work/venv/bin/python" -m unittest discover -s "$SCRIPT_DIR/tests" -p test_shader_pairs.py -v
 PYTHONPATH="$TARGET_DIR/script${PYTHONPATH:+:$PYTHONPATH}" PYTHONDONTWRITEBYTECODE=1 \
     "$TARGET_DIR/work/venv/bin/python" -m unittest discover -s "$SCRIPT_DIR/tests" -p test_ui_fonts.py -v
 PYTHONPATH="$TARGET_DIR/tools${PYTHONPATH:+:$PYTHONPATH}" PYTHONDONTWRITEBYTECODE=1 \

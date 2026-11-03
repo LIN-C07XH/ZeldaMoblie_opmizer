@@ -327,39 +327,77 @@ static void testNativeDisplayAspect(void) {
     cameraSetDisplayAspect(0); uint32_t resolution[] = {1920,1080};
     cameraAdjustOutputSize(resolution); assert(resolution[0] == 1920 && resolution[1] == 1080);
     cameraSetDisplayAspect(874.f/402); cameraAdjustOutputSize(resolution);
-    assert(resolution[0] == 2352 && resolution[1] == 1080);
-    setup(); // HID initialization must not erase display configuration.
-    _Alignas(16) unsigned char owner[0x240] = {0};
-    uintptr_t pointer = (uintptr_t)owner, vtable = cameraDisplay.base + 0x39023e0;
-    memcpy(component + 0x8b8, &pointer, sizeof pointer);
-    memcpy(owner + 0x170, &vtable, sizeof vtable);
-    float aspect = 16.f/9; memcpy(owner + 0x220, &aspect, sizeof aspect);
+    assert(resolution[0] == 1912 && resolution[1] == 880);
+    cameraAdjustOutputSize(resolution); // The same wide target is never widened a second time.
+    assert(resolution[0] == 1912 && resolution[1] == 880);
+    setup();
+    _Alignas(16) unsigned char projection[0xc0] = {0};
+    _Alignas(16) unsigned char unrelated[0xc0] = {0};
+    uintptr_t table[12] = {0}; table[11]=cameraDisplay.base+0x27d5438;
+    uintptr_t vtable = (uintptr_t)table;
+    memcpy(projection, &vtable, sizeof vtable);
+    memcpy(unrelated, &vtable, sizeof vtable);
+    float aspect = 16.f/9;
+    memcpy(projection + 0xb0, &aspect, sizeof aspect);
+    float squareAspect=1; memcpy(unrelated + 0xb0, &squareAspect, sizeof squareAspect);
+    // Both real crash patterns must be irrelevant to input callbacks.
+    uintptr_t poison=UINT64_C(0xbf671bce3c8e411d);
+    memcpy(component + 0x8b8, &poison, sizeof poison);
+    poison=UINT64_C(0x3f800000);
+    memcpy(component + 0x428, &poison, sizeof poison);
     cameraApplyPlayerOrbit(NULL,NULL,component);
-    memcpy(&aspect,owner+0x220,sizeof aspect);
-    assert(fabsf(aspect - 2352.f/1080) < .00001f && (owner[0x178]&1));
-    // Dialogue can disable manual camera input while still using this display camera.
-    component[0x34] = 3; aspect = 16.f/9; memcpy(owner+0x220,&aspect,sizeof aspect);
-    cameraApplyPlayerOrbit(NULL,NULL,component);
-    memcpy(&aspect,owner+0x220,sizeof aspect);
-    assert(fabsf(aspect - 2352.f/1080) < .00001f && !cameraIsGameplayActive());
-    component[0x34] = 0;
-    // Only the live player's perspective object is accepted, never UI ortho.
-    vtable = cameraDisplay.base + 0x3902460; memcpy(owner+0x170,&vtable,sizeof vtable);
-    aspect = 16.f/9; memcpy(owner+0x220,&aspect,sizeof aspect);
-    cameraApplyPlayerOrbit(NULL,NULL,component);
-    memcpy(&aspect,owner+0x220,sizeof aspect); assert(aspect == 16.f/9);
-    cameraSetDisplayAspect(NAN); resolution[0]=1920;
+    cameraUpdateSceneProjection(unrelated);
+    memcpy(&aspect,unrelated+0xb0,sizeof aspect); assert(aspect == 1);
+    // The native updateMatrix entry supplies the live object directly.
+    cameraUpdateSceneProjection(projection);
+    memcpy(&aspect,projection+0xb0,sizeof aspect);
+    assert(fabsf(aspect - 1912.f/880) < .00001f && (projection[8]&1));
+    aspect=16.f/9; memcpy(projection+0xb0,&aspect,sizeof aspect); projection[8]=0;
+    cameraUpdateSceneProjection(projection); // game may restore its default before building
+    memcpy(&aspect,projection+0xb0,sizeof aspect);
+    assert(fabsf(aspect - 1912.f/880) < .00001f && (projection[8]&1));
+    // Copying a stale 16:9 matrix into a wide camera must invalidate the cache
+    // even if the aspect parameter already matches (e.g. rotating frame slots).
+    float horizontal = 2.f / (16.f/9), vertical = 2;
+    memcpy(projection+0xc, &horizontal, sizeof horizontal);
+    memcpy(projection+0x20, &vertical, sizeof vertical);
+    projection[8] = 0;
+    cameraUpdateSceneProjection(projection);
+    assert(projection[8]&1);
+    horizontal = vertical / (1912.f/880);
+    memcpy(projection+0xc, &horizontal, sizeof horizontal);
+    projection[8] = 0;
+    cameraUpdateSceneProjection(projection);
+    assert(!projection[8]); // a coherent cache remains reusable
+    table[11]=cameraDisplay.base+0x27d57e8;
+    aspect=16.f/9; memcpy(projection+0xb0,&aspect,sizeof aspect);
+    cameraUpdateSceneProjection(projection);
+    memcpy(&aspect,projection+0xb0,sizeof aspect); assert(aspect == 16.f/9); // orthographic untouched
+    cameraUpdateSceneProjection(NULL);
+    const uint32_t caps[][2]={{1280,720},{1600,900},{1920,1080},{3840,2160}};
+    const float aspects[]={4.f/3,16.f/9,874.f/402,21.f/9};
+    for (unsigned i=0;i<sizeof caps/sizeof caps[0];i++) for (unsigned j=0;j<sizeof aspects/sizeof aspects[0];j++) {
+        uint32_t clip[]={caps[i][0],caps[i][1]};
+        cameraSetDisplayAspect(aspects[j]); cameraAdjustOutputSize(clip);
+        assert(clip[0]<=caps[i][0] && clip[1]<=caps[i][1]);
+        assert(clip[0] && clip[1]);
+        if (j!=1) assert(clip[0]%8==0 && clip[1]%8==0);
+        assert(fabsf((float)clip[0]/clip[1]/aspects[j]-1)<.01f);
+    }
+    cameraSetDisplayAspect(NAN); resolution[0]=1920; resolution[1]=1080;
     cameraAdjustOutputSize(resolution); assert(resolution[0] == 1920);
     cameraSetDisplayAspect(0); cameraDisplay.activeAspect = 0;
 }
 static void testBoundBridge(void) {
-    ZeldaCameraSharedState shared = {.magic = "CAM5", .version = 5};
-    cameraBindSharedState(&shared); assert(shared.callback != 0 && shared.ultrahandCallback != 0 && shared.selectionCallback != 0 && shared.resolutionCallback != 0);
+    ZeldaCameraSharedState shared = {.magic = "CAM8", .version = 8};
+    cameraBindSharedState(&shared); assert(shared.callback != 0 && shared.ultrahandCallback != 0 && shared.selectionCallback != 0 && shared.resolutionCallback != 0 && shared.projectionUpdateCallback != 0);
     setup(); cameraAddMouseDelta(50, 20);
     ((void (*)(float *, float *, const void *))shared.callback)(orbit, &pitchState, component);
     assert(orbit[0] == 4.8f && orbit[2] < 30 && orbit[1] > 15);
-    ZeldaCameraSharedState old = {.magic = "CAM4", .version = 4};
+    ZeldaCameraSharedState old = {.magic = "CAM5", .version = 5};
     cameraBindSharedState(&old); assert(old.callback == 0);
+    memcpy(old.magic,"CAM6",5); old.version=6;
+    assert(!cameraBindSharedState(&old) && !old.callback);
 }
 int main(void) {
     testNativeOrbitAndConsumption(); testLinearAndTouchInput();
@@ -367,5 +405,5 @@ int main(void) {
     testPitchAndInvalidValues(); testLockKeepsNativeCamera();
     testNativeModesKeepLockAndDropMotion(); testNativeTargetLossAndEmptyHold();
     testEquipmentAndMenuRouting(); testUltrahandOrbit(); testSelectionOrbit(); testUltrahandDetach(); testNativeDisplayAspect(); testBoundBridge();
-    puts("PASS: native player orbit, unchanged arm, mouse/touch, lifecycle, transitions, lock, UltraHand selection/held states, CAM5 bridge");
+    puts("PASS: native player orbit, unchanged arm, mouse/touch, lifecycle, transitions, lock, UltraHand selection/held states, CAM8 bridge");
 }

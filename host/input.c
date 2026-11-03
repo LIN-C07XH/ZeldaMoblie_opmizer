@@ -189,6 +189,12 @@ int input_states(ZeldaPadState *out, int count, uint32_t id, uint32_t style) {
         // 实体手柄优先机制：若手柄右摇杆正在推向非零，完全采用手柄，避免鼠标与手柄打架
         bool gamepadRightStickActive = (controller_axes[2] != 0 || controller_axes[3] != 0);
         if (touch_axes[0] || touch_axes[1]) { out->lx = touch_axes[0]; out->ly = touch_axes[1]; }
+        static unsigned touch_reports;
+        if (touch_reports < 4 && (touch_axes[0] || touch_axes[1] || touch_axes[2] || touch_axes[3])) {
+            touch_reports++;
+            fprintf(stderr,"TOUCH_GUEST sampling=%llu axes=%d,%d,%d,%d\n",(unsigned long long)sampling,
+                touch_axes[0],touch_axes[1],touch_axes[2],touch_axes[3]);
+        }
         if (controller_axes[0] || controller_axes[1]) { out->lx = controller_axes[0]; out->ly = controller_axes[1]; }
         if (gamepadRightStickActive) {
             out->rx = controller_axes[2];

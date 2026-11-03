@@ -160,7 +160,9 @@ uint64_t gate_dispatch(uint64_t ret, uint64_t *regs) {
         if (!strcmp(gates[i].kind, "svc") && (gates[i].arg == 2 || gates[i].arg == 3))
             fprintf(stderr, "Memory address=0x%llx size=0x%llx argument=0x%llx attribute=0x%llx\n", regs[0], regs[1], regs[2], regs[3]);
         caller_trace(regs[29]);
-        exit(78);
+        // Other guest/Metal threads are still running. atexit(kernel_destroy) would
+        // unmap their memory and turn this diagnosed service failure into a second fault.
+        _Exit(78);
     }
     die("unknown gate");
 }

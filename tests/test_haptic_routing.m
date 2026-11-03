@@ -61,17 +61,20 @@ int main(void) { @autoreleasepool {
     phone_haptic_engine=(id)phoneEngine; phone_haptic_player=(id)phone;
     haptic_engines[0]=(id)padEngine; haptic_players[0]=(id)pad;
     assert(vibration_send(handles,values,2,false)); haptics_tick();
-    assert(phone.starts==1 && pad.starts==0 && fabsf(phone.intensity-.1f)<1e-6f);
+    assert(phone.starts==1 && pad.starts==0 && fabsf(phone.intensity-(.25f+.75f*sqrtf(.1f)))<1e-6f);
     // Switching to a controller stops the phone and applies Xbox gain there.
     device=INPUT_DEVICE_GAMEPAD; haptics_tick();
     assert(phone.stops==1 && pad.starts==1 && pad.intensity>.9f);
     device=INPUT_DEVICE_TOUCH; haptics_tick();
     assert(pad.stops==1 && phone.starts==2);
     assert(vibration_send(handles,silent,2,false)); haptics_tick();
+    assert(phone.stops==1 && phone_haptic_running); // Preserve a brief game pulse for 50 ms.
+    haptics_tick(); haptics_tick();
     assert(phone.stops==2 && !phone_haptic_running);
     // Failure is observed with a non-null error pointer, then both sinks close.
     assert(vibration_send(handles,values,2,false)); haptics_tick();
     phone.fail=YES; unsigned generation=phone_generation;
+    haptic_ticks += 3;
     assert(vibration_send(handles,silent,2,false)); haptics_tick();
     assert(phone_generation>generation && !phone_haptic_player && !haptic_players[0]);
     assert(haptic_retry_at>haptic_ticks && haptic_failures==1);
@@ -85,5 +88,13 @@ int main(void) { @autoreleasepool {
     assert(!output[0].low_amplitude && !output[1].low_amplitude);
     assert(gamepad_test_vibration()); gamepad_active(false);
     assert(!haptic_test_ticks && !phone_haptic_running);
+    float previous=0;
+    const float amplitudes[]={.0001f,.01f,.05f,.1f,.5f,1.f};
+    assert(!phone_rumble((ZeldaRumble){0,0}).intensity);
+    assert(!phone_rumble((ZeldaRumble){NAN,0}).intensity);
+    for (unsigned i=0;i<sizeof amplitudes/sizeof amplitudes[0];i++) {
+        float output=phone_rumble((ZeldaRumble){amplitudes[i],0}).intensity;
+        assert(output>.25f && output<=1 && output>=previous); previous=output;
+    }
     puts("Phone/controller haptics: routing, gain isolation, silence, failures, backoff and lifecycle passed");
 } }

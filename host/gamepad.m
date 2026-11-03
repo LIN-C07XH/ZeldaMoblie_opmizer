@@ -27,6 +27,7 @@ static bool haptic_trace;
 static CHHapticEngine *phone_haptic_engine;
 static id<CHHapticAdvancedPatternPlayer> phone_haptic_player;
 static bool phone_haptic_running;
+static uint64_t phone_release_tick;
 static ZeldaRumble phone_last_rumble = {-1, -1};
 static unsigned phone_generation;
 static bool haptics_fail(const char *step, NSError *error);
@@ -34,12 +35,21 @@ static bool haptics_fail(const char *step, NSError *error);
 #define ZELDA_PHONE_HAPTICS_SUPPORTED() ([CHHapticEngine capabilitiesForHardware].supportsHaptics)
 #endif
 
+static ZeldaRumble phone_rumble(ZeldaRumble rumble) {
+    if (!isfinite(rumble.intensity) || rumble.intensity <= 0) return (ZeldaRumble){0, 0};
+    // Quiet HD rumble needs a perceptual floor on the Taptic Engine. Preserve
+    // silence and keep this separate from the Xbox handle-motor compensation.
+    rumble.intensity = .25f + .75f * sqrtf(fminf(1, rumble.intensity));
+    return rumble;
+}
+
 static void phone_haptics_close(void) {
     phone_generation++;
     [phone_haptic_engine stopWithCompletionHandler:nil];
     phone_haptic_player = nil;
     phone_haptic_engine = nil;
     phone_haptic_running = false;
+    phone_release_tick = 0;
     phone_last_rumble = (ZeldaRumble){-1, -1};
 }
 
@@ -50,6 +60,7 @@ static bool phone_haptic_init_player(void) {
     CHHapticEngine *engine = [[CHHapticEngine alloc] initAndReturnError:&error];
     if (!engine) return haptics_fail("phone engine creation", error);
     engine.playsHapticsOnly = YES;
+    engine.autoShutdownEnabled = NO;
     if (![engine startAndReturnError:&error]) {
         [engine stopWithCompletionHandler:nil];
         return haptics_fail("phone engine start", error);
@@ -65,6 +76,7 @@ static bool phone_haptic_init_player(void) {
     player.loopEnd = 1.0;
     phone_haptic_engine = engine;
     phone_haptic_player = player;
+    fprintf(stderr, "HAPTIC phone engine ready; perceptual gain enabled, minimum pulse=50ms\n");
     unsigned gen = phone_generation;
     engine.resetHandler = ^{
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -223,7 +235,9 @@ static void haptics_tick(void) {
         if (has_phone_haptics && haptic_ticks >= haptic_retry_at) {
             float max_intensity = fmaxf(rumble[0].intensity, rumble[1].intensity);
             float target_sharpness = (rumble[0].intensity >= rumble[1].intensity) ? rumble[0].sharpness : rumble[1].sharpness;
-            ZeldaRumble phone_target = {max_intensity, target_sharpness};
+            ZeldaRumble phone_target = phone_rumble((ZeldaRumble){max_intensity, target_sharpness});
+            if (phone_target.intensity) phone_release_tick = haptic_ticks + 3;
+            else if (phone_haptic_running && haptic_ticks < phone_release_tick) phone_target = phone_last_rumble;
             NSError *error = nil;
             if (phone_target.intensity && !phone_haptic_init_player()) return;
             if (!phone_target.intensity) {
@@ -243,6 +257,10 @@ static void haptics_tick(void) {
                 if (!phone_haptic_running) {
                     if (![phone_haptic_player startAtTime:CHHapticTimeImmediate error:&error]) { haptics_fail("phone player start", error); return; }
                     phone_haptic_running = true; haptic_failures = 0;
+                    if (haptic_pulses < (haptic_trace ? 64u : 4u)) {
+                        haptic_pulses++;
+                        fprintf(stderr, "HAPTIC phone output started intensity=%.3f source=%.3f\n", phone_target.intensity, max_intensity);
+                    }
                 }
             }
         }
@@ -331,6 +349,9 @@ void gamepad_start(void) {
             }
         }];
     active = true; select_controller();
+#if TARGET_OS_IOS || defined(ZELDA_TEST_PHONE_HAPTICS)
+    fprintf(stderr, "HAPTIC phone capability=%s\n", ZELDA_PHONE_HAPTICS_SUPPORTED() ? "available" : "unavailable");
+#endif
     vibration_active(active);
     haptic_timer = [NSTimer timerWithTimeInterval:1.0 / 60 repeats:YES block:^(NSTimer *timer) { (void)timer; haptics_tick(); }];
     [NSRunLoop.mainRunLoop addTimer:haptic_timer forMode:NSRunLoopCommonModes];

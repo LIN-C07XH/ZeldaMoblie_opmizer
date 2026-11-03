@@ -1,3 +1,4 @@
+#include "ios_pipeline_cache.inc"
 #include "shader_status.h"
 #include "nvn_index_msl.h"
 static uint64_t z_index_hits, z_index_expansions;
@@ -23,7 +24,7 @@ static uint64_t zelda_expand_indices(const p_draw_idx *draw) {
         NSError *error = nil;
         id<MTLLibrary> library = ZELDA_SHADER_BUILD([g_dev newLibraryWithSource:@(zelda_index_msl) options:nil error:&error]);
         id<MTLFunction> function = [library newFunctionWithName:@"expand_index"];
-        if (function) z_index_pipeline = ZELDA_SHADER_BUILD([g_dev newComputePipelineStateWithFunction:function error:&error]);
+        if (function) z_index_pipeline = ZELDA_SHADER_BUILD(cachedComputePipeline(g_dev, function, &error));
         if (!z_index_pipeline) MDIE("Metal 3 index conversion pipeline failed: %s", error.localizedDescription.UTF8String);
     }
     // Convert on the GPU: source is a buffer object, and earlier copies or dispatches may still be writing it.
@@ -66,7 +67,7 @@ static id<MTLRenderPipelineState> zelda_vertex_write_pipeline(id<MTLFunction> fu
         d.vertexFunction = function; d.rasterizationEnabled = NO;
         for (int i = 0; i < 8; i++) { d.colorAttachments[i].pixelFormat = key[i]; d.colorAttachments[i].writeMask = MTLColorWriteMaskNone; }
         d.depthAttachmentPixelFormat = key[8]; d.stencilAttachmentPixelFormat = key[9]; d.rasterSampleCount = key[10];
-        NSError *error = nil; pipeline = ZELDA_SHADER_BUILD([g_dev newRenderPipelineStateWithDescriptor:d error:&error]);
+        NSError *error = nil; pipeline = ZELDA_SHADER_BUILD(cachedRenderPipeline(g_dev, d, &error));
         if (!pipeline) MDIE("Pass buffer-write pipeline %s failed: %s", function.name.UTF8String, error.localizedDescription.UTF8String);
         pipelines[name] = pipeline;
     }
@@ -127,7 +128,7 @@ static uint64_t zelda_expand_indices(const p_draw_idx *draw) {
         NSError *error = nil;
         id<MTLLibrary> library = ZELDA_SHADER_BUILD([g_dev newLibraryWithSource:@(zelda_index_msl) options:nil error:&error]);
         id<MTLFunction> function = [library newFunctionWithName:@"expand_index"];
-        if (function) z_index_pipeline = ZELDA_SHADER_BUILD([g_dev newComputePipelineStateWithFunction:function error:&error]);
+        if (function) z_index_pipeline = ZELDA_SHADER_BUILD(cachedComputePipeline(g_dev, function, &error));
         z_index_vertex = [library newFunctionWithName:@"expand_index_vertex"];
         MTL4ArgumentTableDescriptor *descriptor = [MTL4ArgumentTableDescriptor new]; descriptor.maxBufferBindCount = 3;
         z_index_arguments = [g_dev newArgumentTableWithDescriptor:descriptor error:&error];

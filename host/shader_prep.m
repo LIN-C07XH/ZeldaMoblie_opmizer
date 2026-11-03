@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "shader_ir.inc"
+#include "shader_compile_policy.h"
 
 static NSArray<NSString *> *library_names(NSString *directory) {
     NSArray *names = [[NSFileManager.defaultManager contentsOfDirectoryAtPath:directory error:NULL]
@@ -27,6 +28,15 @@ static NSArray<NSString *> *preparation_files(NSString *directory, NSArray<NSStr
     const char *skip = getenv("ZELDA_SKIP_SHADER_PREP");
     if (skip && atoi(skip)) return @[];
     const char *all = getenv("ZELDA_SHADER_PREP_ALL");
+#if TARGET_OS_IPHONE
+    // Source compilation only warms a driver-owned cache; it does not create our IR files.
+    // Replaying every source at each launch is expensive and cannot guarantee persistence.
+    // The normal renderer and recorded pipeline warm-up still load the shaders they use.
+    if (!(all && atoi(all))) {
+        fprintf(stderr, "SHADER_PREP policy=recorded-and-on-demand\n");
+        return @[];
+    }
+#endif
     if (ir_enabled() && !(all && atoi(all))) {
         NSArray *entries = [NSFileManager.defaultManager contentsOfDirectoryAtPath:ir_directory(directory) error:nil];
         if (entries.count) {
@@ -105,8 +115,7 @@ unsigned shader_prep_run(id<MTLDevice> device, NSString *directory, void (^progr
     NSArray<NSString *> *pending = preparation_files(directory, files);
     fprintf(stderr, "SHADER_PREP plan available=%lu pending=%lu deferred_ir=%lu\n",
         (unsigned long)files.count, (unsigned long)pending.count, (unsigned long)(files.count - pending.count));
-    long cpus = (long)[[NSProcessInfo processInfo] activeProcessorCount];
-    unsigned failed = prep_files(device, directory, pending, cpus > 4 ? cpus : 4, QOS_CLASS_USER_INITIATED, progress);
+    unsigned failed = prep_files(device, directory, pending, shaderCompileWorkers(), QOS_CLASS_UTILITY, progress);
     shader_ir_report("prep");
     return failed;
 }

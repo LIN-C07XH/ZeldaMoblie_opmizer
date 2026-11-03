@@ -148,6 +148,9 @@ def request(directory=ROOT / 'work/shaders'):
     masks = collections.defaultdict(set, {key: set(value) for key, value in SEEN_MASKS.items()})
     for path in variants.glob('*.json'):
         observed = json.loads(path.read_text())
+        fragment = observed.get('next')
+        if stages.get(observed['base']) == 'vs' and stages.get(fragment) == 'ps':
+            pairs.add((observed['base'], fragment))
         if observed['mask'] and stages.get(observed['base']) in ('vs', 'ps'):
             masks[(stages[observed['base']], sources[observed['base']])].add(observed['mask'])
     library = directory / ('b-' + chain())

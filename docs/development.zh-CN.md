@@ -89,3 +89,21 @@ work/venv/bin/python tools/prepare_modules.py --check
 4. 同时更新英文和中文文档。
 
 贡献的代码按本仓库的 [Apache License 2.0](../LICENSE) 授权接收。
+
+### iOS 触控与播片回归检查
+
+触摸摇杆使用 UIKit 跟踪，不触发触感。原生 UI 桥接空闲时，标准动作仍保持可见；上下文变化仅让按钮原地放大。原生宽屏覆盖启动分配和后续分辨率选择；逻辑裁切、视口、UI 画布与玩家相机使用相同比例，呈现层始终等比缩放。逻辑裁切不能超过固定显示纹理；SetResolution 不会扩展 NVN 显示纹理分配。启动后的模式修改在下次打开应用时生效。
+
+`prepare_ios_shader_support.py` 打包全部已验证的离线变体请求、基础阶段及视频程序。手机日志中 `Captured Zelda ... variant` 后出现 `Shader translation is required on the Mac` 表示场景资源缺失，也可能发生在退出播片时。重新生成支持资源并构建应用；手机启动时校验并修复同版本缓存。构建通过能证明覆盖范围与完整性，不能代替完整游玩验收。
+
+通过 `DEVELOPER_DIR=/path/to/Xcode/Contents/Developer bash script/test_ios_touch_controls.sh <已启动模拟器的UDID>` 检查摇杆 SDK 派发。测试使用 UIControl 的真实跟踪选择器，验证重写方法派发、值变更、限幅、松手及取消；只有 C 输入测试无法发现 UIKit 回调名称拼写错误。
+
+## Mac 着色器编译与卡顿
+
+Mac 保留按需编译 MSL 和运行时翻译新客体着色器的能力，不要求生成或打包全部 iOS 离线 IR。启动时仍预热上次记录的着色器与管线。后台预取保留最多 128 个库（源码成本预算 32 MiB），绘制线程直接复用同内容的库，避免再次调用源码编译器；内容变化会使条目失效。
+
+`host/pipeline_cache.inc` 为 Mac 与 iOS 共用的 `MTLBinaryArchive` 适配层。Mac 缓存位于 `work/shaders/pipeline_cache/`（跟随 `DM_MSL_DIR`），按 GPU、系统、翻译链和源码变换契约隔离。缓存缺失或损坏时正常编译，并在低优先级串行队列中捕获、延迟写入新结果。Mac 仅读取和发布不超过 8 MiB 的归档，每次运行最多捕获 128 次管线创建；超过预算时使用系统驱动缓存，避免 macOS 15 加载大归档时产生数 GiB 的临时内存与长时间启动停顿。读取前检查文件大小，捕获请求使用原子计数限流，不在绘制线程等待归档锁。缓存读取不修改调用方的管线描述符。`PIPELINE_CACHE` 日志显示加载、命中、缺失和保存情况；`ZELDA_PIPELINE_CACHE=0` 可关闭，用于对照。
+
+`ZELDA_SHADER_COMPILE_JOBS` 默认 2，限制为 1–4，分别约束启动预热、后台库预取和预测管线队列。预测任务使用 Utility 优先级，绘制马上需要的任务提升到队首。减少并发会延长冷启动或首次编译，但为音频、输入与系统界面留下 CPU 资源。未知的新着色器或新变体仍必须完成编译后才能正确绘制，不能保证首次访问任何场景都没有等待；不会跳过绘制或替换为错误的着色器。
+
+回归测试：`work/venv/bin/python -m unittest discover -s tests -p test_desktop_updates.py -v`，以及 `bash script/test_metal3.sh`。前者使用临时目录测试云同步生命周期、并发上限与任务优先级、库复用的 GPU 输出，以及跨进程管线缓存命中与损坏恢复，不接触实际存档。

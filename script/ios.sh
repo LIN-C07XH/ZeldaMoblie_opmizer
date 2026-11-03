@@ -15,6 +15,7 @@ build)
     work/venv/bin/python tools/prepare_modules.py --check
     work/venv/bin/python script/prepare_graphics.py
     work/venv/bin/python script/prepare_ios_shader_support.py
+    work/venv/bin/python script/prepare_ios_shader_ir.py
     bash script/build_ios_deps.sh
     work/venv/bin/python "$PWD/core/ios/tools/gen_embed.py" work/patched work/ios/embed.S main subsdk0 sdk
     cmake -S ios -B "$ios_build_dir" -G Xcode -DCMAKE_SYSTEM_NAME=iOS \
@@ -25,10 +26,12 @@ build)
         -configuration Release -sdk iphoneos -jobs 4 -allowProvisioningUpdates \
         -allowProvisioningDeviceRegistration build
     work/venv/bin/python script/prepare_ios_shader_support.py --verify-bundle "$app"
+    work/venv/bin/python script/prepare_ios_shader_ir.py --verify-bundle "$app"
     ;;
 install)
     : "${ZELDA_IOS_DEVICE:?Set ZELDA_IOS_DEVICE to the target device}"
     work/venv/bin/python script/prepare_ios_shader_support.py --verify-bundle "$app"
+    work/venv/bin/python script/prepare_ios_shader_ir.py --verify-bundle "$app"
     xcrun devicectl device install app --device "$ZELDA_IOS_DEVICE" "$app"
     ;;
 launch)

@@ -110,6 +110,9 @@ uint32_t actionGetActiveEvents(void);
 /// 获取当前布局配置
 LayoutConfig actionGetLayoutConfig(void);
 
+// Tablet presets only replace shipped geometry, preserving custom layouts.
+bool actionLayoutUsesMobileDefaults(void);
+
 /// 根据屏幕尺寸与安全区，计算指定按钮的绝对屏幕渲染矩形
 ComputedButtonRect actionComputeButtonRect(const LayoutButtonDef *button,
                                            float screenWidth, float screenHeight,

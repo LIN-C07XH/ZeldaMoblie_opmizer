@@ -1,3 +1,4 @@
+#include "ios_pipeline_cache.inc"
 #include "shader_status.h"
 // Conditional colour clears inside game passes (see nvn_color_clear.h). Included after nvn_query_gpu.inc.
 static int zelda_inline_partial_clear(const p_clear_color *clear) {
@@ -39,7 +40,7 @@ static void zelda_color_clear_draw(const zelda_color_clear_t *c) {
             d.colorAttachments[i].writeMask = i == c->index ? MTLColorWriteMaskAll : MTLColorWriteMaskNone;
         }
         d.depthAttachmentPixelFormat = key[8]; d.stencilAttachmentPixelFormat = key[9]; d.rasterSampleCount = key[10];
-        NSError *error = nil; pipeline = ZELDA_SHADER_BUILD([g_dev newRenderPipelineStateWithDescriptor:d error:&error]);
+        NSError *error = nil; pipeline = ZELDA_SHADER_BUILD(cachedRenderPipeline(g_dev, d, &error));
         if (!pipeline) MDIE("Inline colour clear pipeline failed: %s", error.localizedDescription.UTF8String);
         pipelines[name] = pipeline;
     }

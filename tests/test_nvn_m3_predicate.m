@@ -106,6 +106,7 @@ static void write_query(uint64_t left, uint64_t right) {
     [encoder endEncoding];
 }
 int main(void) { @autoreleasepool {
+    setenv("ZELDA_M3_PREDICATE_ASYNC", "0", 1);
     id<MTLDevice> device = MTLCreateSystemDefaultDevice(); assert(device);
     queue = [device newCommandQueue]; queries = [device newBufferWithLength:4096 options:MTLResourceStorageModeShared];
     mtl_sub_begin(); write_query(7, 7);

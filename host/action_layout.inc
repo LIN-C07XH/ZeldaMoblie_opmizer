@@ -62,151 +62,38 @@ void actionLayoutSetDefaultMobile(void) {
     memset(&currentLayout, 0, sizeof(currentLayout));
     currentActiveEvents = EVENT_MASK_ALWAYS;
 
-    // 1. 普攻键 Y (王者平A / 吃鸡开火位置)：大圆按键 (72pt)
-    LayoutButtonDef btnAttack = {
-        .id = "attack_y",
-        .title = "攻击",
-        .anchor = ANCHOR_BOTTOM_RIGHT,
-        .offsetX = -126.0f,
-        .offsetY = -106.0f,
-        .width = 80.0f,
-        .height = 80.0f,
-        .padButton = PAD_BTN_Y,
-        .visibleEvents = EVENT_MASK_ALWAYS,
-        .highlightEvents = EVENT_MASK_COMBAT,
-        .isSpecialAction = false
+    // Stable thumb positions. Events change emphasis, never availability.
+    LayoutButtonDef buttons[] = {
+        {.id="attack_y", .title="攻击", .anchor=ANCHOR_BOTTOM_RIGHT,
+         .offsetX=-114, .offsetY=-98, .width=76, .height=76, .padButton=PAD_BTN_Y,
+         .visibleEvents=EVENT_MASK_ALWAYS, .highlightEvents=EVENT_MASK_COMBAT},
+        {.id="dash_b", .title="疾跑", .anchor=ANCHOR_BOTTOM_RIGHT,
+         .offsetX=-36, .offsetY=-40, .width=52, .height=52, .padButton=PAD_BTN_B,
+         .visibleEvents=EVENT_MASK_ALWAYS, .highlightEvents=EVENT_MASK_CLIMBING|EVENT_MASK_SWIMMING},
+        {.id="jump_x", .title="跳跃", .anchor=ANCHOR_BOTTOM_RIGHT,
+         .offsetX=-36, .offsetY=-166, .width=54, .height=54, .padButton=PAD_BTN_X,
+         .visibleEvents=EVENT_MASK_ALWAYS, .highlightEvents=EVENT_MASK_IN_AIR},
+        {.id="interact_a", .title="确定", .anchor=ANCHOR_BOTTOM_RIGHT,
+         .offsetX=-102, .offsetY=-238, .width=104, .height=48, .padButton=PAD_BTN_A,
+         .visibleEvents=EVENT_MASK_ALWAYS, .highlightEvents=EVENT_MASK_INTERACT},
+        {.id="bow_zr", .title="射箭", .anchor=ANCHOR_BOTTOM_RIGHT,
+         .offsetX=-194, .offsetY=-132, .width=48, .height=48, .padButton=PAD_BTN_ZR,
+         .visibleEvents=EVENT_MASK_ALWAYS},
+        {.id="target_lock_zl", .title="锁定", .anchor=ANCHOR_BOTTOM_RIGHT,
+         .offsetX=-194, .offsetY=-54, .width=48, .height=48, .padButton=PAD_BTN_ZL,
+         .visibleEvents=EVENT_MASK_ALWAYS, .highlightEvents=EVENT_MASK_COMBAT},
+        {.id="switch_target", .title="切换", .anchor=ANCHOR_BOTTOM_RIGHT,
+         .offsetX=-258, .offsetY=-54, .width=44, .height=44, .padButton=PAD_BTN_SPECIAL_SWITCH,
+         .visibleEvents=EVENT_MASK_ALWAYS, .isSpecialAction=true},
+        {.id="throw_r", .title="投掷", .anchor=ANCHOR_BOTTOM_RIGHT,
+         .offsetX=-258, .offsetY=-132, .width=48, .height=48, .padButton=PAD_BTN_R,
+         .visibleEvents=EVENT_MASK_ALWAYS},
+        {.id="skill_l", .title="能力", .anchor=ANCHOR_BOTTOM_RIGHT,
+         .offsetX=-258, .offsetY=-210, .width=52, .height=52, .padButton=PAD_BTN_L,
+         .visibleEvents=EVENT_MASK_ALWAYS, .highlightEvents=EVENT_MASK_ULTRAHAND}
     };
-
-    // 2. 疾跑 / 闪避 / 收刀 B (原神闪避冲刺位)：(56pt)
-    LayoutButtonDef btnDash = {
-        .id = "dash_b",
-        .title = "疾跑",
-        .anchor = ANCHOR_BOTTOM_RIGHT,
-        .offsetX = -48.0f,
-        .offsetY = -62.0f,
-        .width = 52.0f,
-        .height = 52.0f,
-        .padButton = PAD_BTN_B,
-        .visibleEvents = EVENT_MASK_ALWAYS,
-        .highlightEvents = EVENT_MASK_NONE,
-        .isSpecialAction = false
-    };
-
-    // 3. 跳跃 X (吃鸡跳跃翻墙位)：(52pt)
-    LayoutButtonDef btnJump = {
-        .id = "jump_x",
-        .title = "跳跃",
-        .anchor = ANCHOR_BOTTOM_RIGHT,
-        .offsetX = -44.0f,
-        .offsetY = -132.0f,
-        .width = 56.0f,
-        .height = 56.0f,
-        .padButton = PAD_BTN_X,
-        .visibleEvents = EVENT_MASK_ALWAYS,
-        .highlightEvents = EVENT_MASK_NONE,
-        .isSpecialAction = false
-    };
-
-    // 4. Native primary action, caption and button supplied by DoCommand.
-    LayoutButtonDef btnInteract = {
-        .id = "interact_a",
-        .title = "操作",
-        .anchor = ANCHOR_MIDDLE_RIGHT,
-        .offsetX = -104.0f,
-        .offsetY = -54.0f,
-        .width = 120.0f,
-        .height = 52.0f,
-        .padButton = PAD_BTN_A,
-        .visibleEvents = EVENT_MASK_ALWAYS,
-        .highlightEvents = EVENT_MASK_INTERACT,
-        .isSpecialAction = false
-    };
-
-    // 5. 射箭 ZR (开镜开弓位)：(48pt)
-    LayoutButtonDef btnBow = {
-        .id = "bow_zr",
-        .title = "射箭",
-        .anchor = ANCHOR_BOTTOM_RIGHT,
-        .offsetX = -202.0f,
-        .offsetY = -154.0f,
-        .width = 48.0f,
-        .height = 48.0f,
-        .padButton = PAD_BTN_ZR,
-        .visibleEvents = EVENT_MASK_ALWAYS,
-        .highlightEvents = EVENT_MASK_NONE,
-        .isSpecialAction = false
-    };
-
-    // 6. 锁敌 ZL (智能注视 Toggle)：(46pt)
-    LayoutButtonDef btnLock = {
-        .id = "target_lock_zl",
-        .title = "锁定",
-        .anchor = ANCHOR_BOTTOM_RIGHT,
-        .offsetX = -218.0f,
-        .offsetY = -72.0f,
-        .width = 48.0f,
-        .height = 48.0f,
-        .padButton = PAD_BTN_ZL,
-        .visibleEvents = EVENT_MASK_ALWAYS,
-        .highlightEvents = EVENT_MASK_COMBAT,
-        .isSpecialAction = false
-    };
-
-    // 7. 快速切怪 (微脉冲切怪)：(38pt)
-    LayoutButtonDef btnSwitch = {
-        .id = "switch_target",
-        .title = "切换",
-        .anchor = ANCHOR_BOTTOM_RIGHT,
-        .offsetX = -280.0f,
-        .offsetY = -72.0f,
-        .width = 44.0f,
-        .height = 44.0f,
-        .padButton = PAD_BTN_SPECIAL_SWITCH,
-        .visibleEvents = EVENT_MASK_ALWAYS,
-        .highlightEvents = EVENT_MASK_NONE,
-        .isSpecialAction = true
-    };
-
-    // 8. 动态滑翔伞 (滞空 / 下落时动态浮现并高亮闪烁)：(58pt)
-    LayoutButtonDef btnGlider = {
-        .id = "glider_x",
-        .title = "滑翔",
-        .anchor = ANCHOR_MIDDLE_RIGHT,
-        .offsetX = -104.0f,
-        .offsetY = -54.0f,
-        .width = 120.0f,
-        .height = 52.0f,
-        .padButton = PAD_BTN_X,
-        .visibleEvents = EVENT_MASK_IN_AIR,
-        .highlightEvents = EVENT_MASK_IN_AIR,
-        .isSpecialAction = false
-    };
-
-    // 9. 究极手 / 余料建造 L：(46pt)
-    LayoutButtonDef btnSkill = {
-        .id = "skill_l",
-        .title = "能力",
-        .anchor = ANCHOR_BOTTOM_RIGHT,
-        .offsetX = -268.0f,
-        .offsetY = -148.0f,
-        .width = 52.0f,
-        .height = 52.0f,
-        .padButton = PAD_BTN_L,
-        .visibleEvents = EVENT_MASK_ALWAYS,
-        .highlightEvents = EVENT_MASK_ULTRAHAND,
-        .isSpecialAction = false
-    };
-
-    currentLayout.buttons[0] = btnAttack;
-    currentLayout.buttons[1] = btnDash;
-    currentLayout.buttons[2] = btnJump;
-    currentLayout.buttons[3] = btnInteract;
-    currentLayout.buttons[4] = btnBow;
-    currentLayout.buttons[5] = btnLock;
-    currentLayout.buttons[6] = btnSwitch;
-    currentLayout.buttons[7] = btnGlider;
-    currentLayout.buttons[8] = btnSkill;
-    currentLayout.buttonCount = 9;
+    currentLayout.buttonCount = sizeof buttons / sizeof buttons[0];
+    memcpy(currentLayout.buttons, buttons, sizeof buttons);
     mobileDefaults = currentLayout;
 
     pthread_mutex_unlock(&layoutLock);
@@ -235,6 +122,22 @@ LayoutConfig actionGetLayoutConfig(void) {
     LayoutConfig cfg = currentLayout;
     pthread_mutex_unlock(&layoutLock);
     return cfg;
+}
+
+bool actionLayoutUsesMobileDefaults(void) {
+    pthread_mutex_lock(&layoutLock);
+    bool matches = currentLayout.buttonCount == mobileDefaults.buttonCount;
+    for (int i = 0; matches && i < currentLayout.buttonCount; i++) {
+        const LayoutButtonDef *button = &currentLayout.buttons[i];
+        const LayoutButtonDef *original = NULL;
+        for (int j = 0; j < mobileDefaults.buttonCount; j++)
+            if (!strcmp(button->id, mobileDefaults.buttons[j].id)) original = &mobileDefaults.buttons[j];
+        matches = original && button->anchor == original->anchor && button->offsetX == original->offsetX &&
+            button->offsetY == original->offsetY && button->width == original->width &&
+            button->height == original->height && button->padButton == original->padButton;
+    }
+    pthread_mutex_unlock(&layoutLock);
+    return matches;
 }
 
 static void extractJsonString(const char *block, const char *key, char *out, size_t maxLen) {
@@ -281,27 +184,31 @@ static const char *layoutDelimiter(const char *p, char delimiter) {
     return NULL;
 }
 
-// Migrate only the exact geometry and mappings of our two shipped presets.
+// Migrate only the exact geometry and mappings of our three shipped presets.
 // Real custom layouts and labels are retained; no configuration file is written.
 static bool actionLayoutMigrateLegacy(LayoutConfig *cfg) {
-    static const float old[2][9][4] = {
+    static const float old[3][9][4] = {
         {{-95,-95,72,72},{-185,-50,56,56},{-45,-190,52,52},{-170,-145,104,54},
          {-115,-225,48,48},{-245,-120,46,46},{-245,-175,38,38},{-45,-260,58,58},{-180,-225,46,46}},
         {{-56,-58,72,72},{-144,-38,56,56},{-36,-148,52,52},{-158,-116,104,52},
-         {-104,-202,48,48},{-246,-64,48,48},{-246,-128,44,44},{-36,-216,56,56},{-178,-202,48,48}}
+         {-104,-202,48,48},{-246,-64,48,48},{-246,-128,44,44},{-36,-216,56,56},{-178,-202,48,48}},
+        {{-126,-106,80,80},{-48,-62,52,52},{-44,-132,56,56},{-104,-54,120,52},
+         {-202,-154,48,48},{-218,-72,48,48},{-280,-72,44,44},{-104,-54,120,52},{-268,-148,52,52}}
     };
     if (cfg->buttonCount != 9 || mobileDefaults.buttonCount != 9) return false;
     int slots[9];
-    for (int version=0;version<2;version++) {
+    for (int version=0;version<3;version++) {
         bool matched=true;
         for (int i=0;i<9;i++) {
             const LayoutButtonDef *def=&mobileDefaults.buttons[i];
             slots[i]=-1;
-            for (int j=0;j<9;j++) if (!strcmp(cfg->buttons[j].id,def->id)) slots[i]=j;
+            for (int j=0;j<9;j++) if (!strcmp(cfg->buttons[j].id, i == 7 ? "glider_x" : def->id)) slots[i]=j;
             if (slots[i]<0) { matched=false; break; }
             const LayoutButtonDef *b=&cfg->buttons[slots[i]];
-            if (b->anchor!=ANCHOR_BOTTOM_RIGHT || b->padButton!=def->padButton ||
-                b->visibleEvents!=def->visibleEvents || b->highlightEvents!=def->highlightEvents ||
+            UiAnchor anchor = version == 2 && (i == 3 || i == 7) ? ANCHOR_MIDDLE_RIGHT : ANCHOR_BOTTOM_RIGHT;
+            uint32_t highlights[9] = {EVENT_MASK_COMBAT,0,0,EVENT_MASK_INTERACT,0,EVENT_MASK_COMBAT,0,EVENT_MASK_IN_AIR,EVENT_MASK_ULTRAHAND};
+            if (b->anchor!=anchor || b->padButton!=(i == 7 ? PAD_BTN_X : def->padButton) ||
+                b->visibleEvents!=(i == 7 ? EVENT_MASK_IN_AIR : EVENT_MASK_ALWAYS) || b->highlightEvents!=highlights[i] ||
                 b->offsetX!=old[version][i][0] || b->offsetY!=old[version][i][1] ||
                 b->width!=old[version][i][2] || b->height!=old[version][i][3]) { matched=false; break; }
         }
@@ -311,6 +218,8 @@ static bool actionLayoutMigrateLegacy(LayoutConfig *cfg) {
             const LayoutButtonDef *def=&mobileDefaults.buttons[i];
             b->anchor=def->anchor; b->offsetX=def->offsetX; b->offsetY=def->offsetY;
             b->width=def->width; b->height=def->height;
+            b->visibleEvents=def->visibleEvents; b->highlightEvents=def->highlightEvents;
+            if (i == 7) *b = *def;
         }
         return true;
     }
@@ -472,11 +381,6 @@ ComputedButtonRect actionComputeButtonRect(const LayoutButtonDef *button,
 
     float w = button->width;
     float h = button->height;
-    if (highlight) {
-        // 高亮时放大 1.15 倍，更有手游互动手感
-        w *= 1.15f;
-        h *= 1.15f;
-    }
 
     rect.width = fminf(safeW, fmaxf(1, roundf(w)));
     rect.height = fminf(safeH, fmaxf(1, roundf(h)));

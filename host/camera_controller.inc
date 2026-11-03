@@ -51,20 +51,23 @@ static CameraState globalCameraState = {
                DEFAULT_ACCEL_FACTOR, 0, false, true, true}
 };
 
-// CAM5 adds a native output-size callback, separate from player camera input.
+// CAM8 keeps projection callbacks separate from PlayerCamera input callbacks.
 // The guest invokes this immutable callback synchronously on its camera thread.
 typedef struct {
     char magic[8];
     uint32_t version, reserved;
     uintptr_t callback, ultrahandCallback, selectionCallback, resolutionCallback;
+    uintptr_t projectionUpdateCallback;
 } ZeldaCameraSharedState;
 _Static_assert(offsetof(ZeldaCameraSharedState, callback) == 0x10, "camera callback ABI");
 _Static_assert(offsetof(ZeldaCameraSharedState, selectionCallback) == 0x20, "selection callback ABI");
-_Static_assert(sizeof(ZeldaCameraSharedState) == 0x30, "camera bridge ABI");
+_Static_assert(offsetof(ZeldaCameraSharedState, projectionUpdateCallback) == 0x30, "projection update ABI");
+_Static_assert(sizeof(ZeldaCameraSharedState) == 0x38, "camera bridge ABI");
 static struct {
     uintptr_t base;
     float requestedAspect, activeAspect;
     uint32_t width, height;
+
 } cameraDisplay;
 static struct {
     void *(*targetType)(void);
@@ -159,7 +162,7 @@ static bool cameraUltrahandActiveLocked(void) {
 
 void cameraSetDisplayAspect(float aspect) {
     pthread_mutex_lock(&cameraLock);
-    cameraDisplay.requestedAspect = isfinite(aspect) && aspect > 16.f / 9 + .01f && aspect <= 3.6f ? aspect : 0;
+    cameraDisplay.requestedAspect = isfinite(aspect) && aspect >= .8f && aspect <= 3.6f && fabsf(aspect - 16.f / 9) > .01f ? aspect : 0;
     pthread_mutex_unlock(&cameraLock);
 }
 
@@ -174,14 +177,24 @@ static void cameraAdjustOutputSize(uint32_t *size) {
     if (!size) return;
     pthread_mutex_lock(&cameraLock);
     uint32_t width = size[0], height = size[1];
+    // The Switch window has a fixed maximum backing texture (1920x1080).
+    // SetResolution updates its crop/scene viewport, not that allocation. Keep
+    // the logical camera/UI rectangle inside the backing surface at all times.
     if (cameraDisplay.requestedAspect && width >= 640 && width <= 4096 && height >= 480 && height <= 2160 &&
-        fabs((double)width / height - 16.0 / 9) < .01) {
-        double wanted = round(height * cameraDisplay.requestedAspect / 8) * 8;
-        if (wanted <= 4096) size[0] = (uint32_t)wanted;
+        fabs((double)width/height - 16.0/9) < .01) {
+        uint32_t capWidth = width / 8 * 8, capHeight = height / 8 * 8;
+        double clipHeight = fmin((double)capHeight, capWidth / cameraDisplay.requestedAspect);
+        uint32_t h = (uint32_t)floor(clipHeight / 8) * 8;
+        uint32_t w = (uint32_t)lround(h * cameraDisplay.requestedAspect / 8) * 8;
+        if (w > capWidth) w = capWidth;
+        if (w >= 8 && h >= 8) { size[0] = w; size[1] = h; }
     }
-    cameraDisplay.width = size[0]; cameraDisplay.height = size[1];
-    cameraDisplay.activeAspect = cameraDisplay.requestedAspect && height && fabs((double)width / height - 16.0 / 9) < .01 ?
-        (float)size[0] / size[1] : 0;
+    if (size[0] && size[1]) {
+        cameraDisplay.width = size[0]; cameraDisplay.height = size[1];
+        // Projection follows the size the game will actually render, never the
+        // device aspect on a still-16:9 target. Repeated calls are idempotent.
+        cameraDisplay.activeAspect = cameraDisplay.requestedAspect ? (float)size[0]/size[1] : 0;
+    }
 #ifndef UNIT_TEST
     static uint64_t previous;
     uint64_t dimensions = ((uint64_t)size[0] << 32) | size[1];
@@ -194,33 +207,85 @@ static void cameraAdjustOutputSize(uint32_t *size) {
     pthread_mutex_unlock(&cameraLock);
 }
 
-// PlayerCamera's own perspective projection. UI orthographic projections,
-// shadows, reflection cameras and their matrices are never written here.
-static void cameraApplyDisplayAspectLocked(const void *component) {
-    if (!cameraDisplay.activeAspect) return;
-    uintptr_t owner, vtable;
-    memcpy(&owner, (const char *)component + 0x8b8, sizeof owner); // native state+0x428
-    if (!owner) return;
-    char *projection = (char *)owner + 0x170; // verified by ExecutePlayerCameraBase::initialize
+// Called with the live Projection object at all four native matrix calculation paths,
+// before their independent dirty checks and inlined perspective calculations. Input blackboards
+// and graph connection ports are never used to locate rendering objects.
+static void cameraUpdateSceneProjection(void *liveProjection) {
+    if (!liveProjection) return;
+    pthread_mutex_lock(&cameraLock);
+    if (!cameraDisplay.activeAspect) { pthread_mutex_unlock(&cameraLock); return; }
+    char *projection = liveProjection;
+    uintptr_t vtable;
     memcpy(&vtable, projection, sizeof vtable);
-    if (vtable != cameraDisplay.base + 0x39023e0) return;
+    // Derived scene projections can have their own vtable. The native method
+    // itself selects the perspective layout by this exact calculator slot.
+    uintptr_t calculator;
+    memcpy(&calculator,(const char *)vtable+0x58,sizeof calculator);
+    if (calculator != cameraDisplay.base + 0x27d5438) { pthread_mutex_unlock(&cameraLock); return; }
     float aspect;
     memcpy(&aspect, projection + 0xb0, sizeof aspect); // native getAspect at 0xc9300
-    if (!isfinite(aspect) || aspect < .5f || aspect > 4) return;
-    if (fabsf(aspect - cameraDisplay.activeAspect) > .00001f) {
+#ifndef UNIT_TEST
+    static unsigned observed;
+    if (observed < 2) {
+        observed++;
+        fprintf(stderr,"[DISPLAY_CAMERA] native perspective calculator matched aspect=%.6f target=%.6f\n",
+            aspect,cameraDisplay.activeAspect);
+    }
+#endif
+    // Match the game's screen perspective. Square offscreen cameras and all
+    // orthographic UI/shadow projections keep their own aspect.
+    if (!isfinite(aspect) || (fabsf(aspect - 16.f/9) > .01f &&
+        fabsf(aspect - cameraDisplay.activeAspect) > .01f)) {
+        pthread_mutex_unlock(&cameraLock); return;
+    }
+    float horizontal, vertical;
+    memcpy(&horizontal, projection + 0xc, sizeof horizontal);
+    memcpy(&vertical, projection + 0x20, sizeof vertical);
+    double pixelRatio = (double)horizontal * cameraDisplay.activeAspect / vertical;
+    // The game can copy an already-cached matrix independently of its camera
+    // parameters. A matching aspect field does not prove the cache matches it.
+    bool staleMatrix = fabsf(aspect-cameraDisplay.activeAspect) < .00001f &&
+        !(projection[8] & 1) && isfinite(pixelRatio) &&
+        fabsf(vertical) > .000001f && fabs(pixelRatio - 1) > .001;
+#ifndef UNIT_TEST
+    static unsigned long calls, changes, stale;
+    static double reportAt;
+    calls++;
+    if (fabsf(aspect - cameraDisplay.activeAspect) > .00001f) changes++;
+    if (staleMatrix) stale++;
+    double now = cameraNow();
+    if (now >= reportAt) {
+        reportAt = now + 1;
+        fprintf(stderr, "[DISPLAY_PROJECTION] calls=%lu changes=%lu stale=%lu type=main+%#lx aspect=%.6f target=%.6f dirty=%u pixel_scale=%.6f\n",
+            calls, changes, stale, (unsigned long)(vtable-cameraDisplay.base),
+            aspect, cameraDisplay.activeAspect, (unsigned char)projection[8], pixelRatio);
+    }
+    static unsigned reported;
+    bool report = reported < 2;
+    if (report) reported++;
+    static bool matrixReported;
+    if (!matrixReported && fabsf(aspect - cameraDisplay.activeAspect) < .00001f) {
+        float horizontal, vertical;
+        memcpy(&horizontal,projection+0xc,sizeof horizontal);
+        memcpy(&vertical,projection+0x20,sizeof vertical);
+        double pixelRatio = (double)horizontal * cameraDisplay.width / ((double)vertical * cameraDisplay.height);
+        if (isfinite(pixelRatio) && fabs(pixelRatio-1) < .01) {
+            matrixReported=true;
+            fprintf(stderr,"[DISPLAY_CAMERA] native cached matrix verified pixel_scale=%.6f output=%ux%u\n",
+                pixelRatio,cameraDisplay.width,cameraDisplay.height);
+        }
+    }
+#endif
+    if (fabsf(aspect - cameraDisplay.activeAspect) > .00001f || staleMatrix) {
         memcpy(projection + 0xb0, &cameraDisplay.activeAspect, sizeof aspect);
         projection[8] |= 1; // native projection-dirty flag; let the engine rebuild it
 #ifndef UNIT_TEST
-        static double reported;
-        if (cameraNow() - reported > 5) {
-            reported = cameraNow();
-            fprintf(stderr, "[DISPLAY_CAMERA] player perspective aspect %.5f -> %.5f; vertical FOV unchanged\n",
-                aspect, cameraDisplay.activeAspect);
-        }
+        if (report) fprintf(stderr, "[DISPLAY_CAMERA] native scene projection aspect %.5f -> %.5f; vertical FOV unchanged\n",
+            aspect, cameraDisplay.activeAspect);
 #endif
     }
+    pthread_mutex_unlock(&cameraLock);
 }
-
 // v1.4.3 ExecutePlayerCameraChase, BEFORE its requested pose reaches collision.
 // orbit = {native distance, elevation degrees, azimuth degrees}. This is NOT a
 // view matrix and none of these coordinates are copied across host frames.
@@ -237,7 +302,6 @@ static void cameraApplyPlayerOrbit(float *orbit, float *pitchState, const void *
     double now = cameraNow();
     if (orbitUpdate) cameraDiagnostics.chase++; else cameraDiagnostics.lifecycle++;
     bool valid = target && !(flags & 3) && !zelda_is_movie();
-    if (!orbitUpdate && target && !zelda_is_movie()) cameraApplyDisplayAspectLocked(component);
     if (orbitUpdate) valid = valid && isfinite(orbit[0]) && orbit[0] > 0 && orbit[0] < 500 &&
         isfinite(orbit[1]) && isfinite(orbit[2]) && isfinite(*pitchState);
     static int trace = -1;
@@ -507,7 +571,7 @@ static void cameraApplySelectionOrbit(float *orbit, void *execution, const void 
 bool cameraBindSharedState(void *statePtr) {
     if (!statePtr) return false;
     ZeldaCameraSharedState *state = statePtr;
-    if (memcmp(state->magic, "CAM5\0\0\0\0", 8) || state->version != 5) {
+    if (memcmp(state->magic, "CAM8\0\0\0\0", 8) || state->version != 8) {
         fprintf(stderr, "[CAMERA_HOOK] incompatible bridge; rebuild patched modules\n");
         return false;
     }
@@ -520,7 +584,8 @@ bool cameraBindSharedState(void *statePtr) {
     __atomic_store_n(&state->ultrahandCallback, (uintptr_t)cameraApplyUltrahandOrbit, __ATOMIC_RELEASE);
     __atomic_store_n(&state->selectionCallback, (uintptr_t)cameraApplySelectionOrbit, __ATOMIC_RELEASE);
     __atomic_store_n(&state->resolutionCallback, (uintptr_t)cameraAdjustOutputSize, __ATOMIC_RELEASE);
-    fprintf(stderr, "[CAMERA_BRIDGE] CAM5 native output aspect + player orbit\n");
+    __atomic_store_n(&state->projectionUpdateCallback, (uintptr_t)cameraUpdateSceneProjection, __ATOMIC_RELEASE);
+    fprintf(stderr, "[CAMERA_BRIDGE] CAM8 four native projection paths + coherent cache + bounded output clip\n");
     return true;
 }
 

@@ -37,6 +37,12 @@ int main(void) { @autoreleasepool {
             *other=[root stringByAppendingPathComponent:@"other"];
         for(NSString *path in @[local,remote,other]) assert([fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil]);
         useLocal(local);
+        assert(!cloudSaveSyncSetFolderURL([NSURL fileURLWithPath:local]));
+        assert(!cloudSaveSyncSetFolderURL([NSURL fileURLWithPath:root]));
+        NSString *nested = [local stringByAppendingPathComponent:@"nested"];
+        assert([fm createDirectoryAtPath:nested withIntermediateDirectories:NO attributes:nil error:nil]);
+        assert(!cloudSaveSyncSetFolderURL([NSURL fileURLWithPath:nested]));
+        assert([fm removeItemAtPath:nested error:nil]);
         assert(cloudSaveSyncPullBlocking(1,nil)==CloudSaveSyncStatusSkipped);
         assert(cloudSaveSyncSetFolderURL([NSURL fileURLWithPath:remote]));
         writeText(local,@"progress.sav",@"one"); writeText(local,@"removed.sav",@"old");

@@ -12,6 +12,7 @@
 #include "settings.h"
 #include "camera_controller.h"
 #include "native_prompt_overlay.inc"
+#include "mac_cloud_save.inc"
 #include <unistd.h>
 
 static CAMetalLayer *metal_layer;
@@ -143,7 +144,19 @@ static void apply_vibration(int mode) {
     controls_refresh();
 }
 
-@interface ZeldaWindowDelegate : NSObject <NSWindowDelegate>
+static void finishMacQuit(void) {
+    if (cameraIsMouseCaptured()) {
+        CGAssociateMouseAndMouseCursorPosition(true);
+        [NSCursor unhide];
+    }
+    stop_vsync();
+    gamepad_stop(); performance_stop();
+    if (resource_report) resource_report(0, "window closed");
+    // Reclaim live guest threads together; per-resource exit handlers race IPC.
+    fflush(NULL); _exit(0);
+}
+
+@interface ZeldaWindowDelegate : NSObject <NSWindowDelegate, NSApplicationDelegate>
 @end
 @implementation ZeldaWindowDelegate
 - (void)windowDidResignKey:(NSNotification *)notification {
@@ -168,17 +181,19 @@ static void apply_vibration(int mode) {
     store_settings(^(zelda_settings_t *settings) { settings->fullscreen = false; });
     controls_refresh();
 }
-- (void)windowWillClose:(NSNotification *)notification {
+- (BOOL)windowShouldClose:(NSWindow *)sender {
+    (void)sender;
+    [MAC_CLOUD_SAVE quitAfterUpload:^{ finishMacQuit(); }];
+    return NO;
+}
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
+    (void)sender;
+    [MAC_CLOUD_SAVE quitAfterUpload:^{ finishMacQuit(); }];
+    return NSTerminateCancel;
+}
+- (void)applicationDidResignActive:(NSNotification *)notification {
     (void)notification;
-    if (cameraIsMouseCaptured()) {
-        CGAssociateMouseAndMouseCursorPosition(true);
-        [NSCursor unhide];
-    }
-    stop_vsync();
-    gamepad_stop(); performance_stop();
-    if (resource_report) resource_report(0, "window closed");
-    // Reclaim live guest threads and host resources together; per-resource exit handlers race ongoing IPC.
-    fflush(NULL); _exit(0);
+    [MAC_CLOUD_SAVE uploadSave:nil];
 }
 @end
 
@@ -196,7 +211,8 @@ static void apply_vibration(int mode) {
     input_key(event.keyCode, 0);
 }
 - (void)flagsChanged:(NSEvent *)event {
-    int down = !!(event.modifierFlags & NSEventModifierFlagShift);
+    NSEventModifierFlags modifier = (event.keyCode == 59 || event.keyCode == 62) ? NSEventModifierFlagControl : NSEventModifierFlagShift;
+    int down = !!(event.modifierFlags & modifier);
     input_key(event.keyCode, down);
 }
 @end
@@ -247,6 +263,15 @@ static void install_menu(ZeldaMenu *actions) {
     NSMenu *bar = [NSMenu new];
     NSMenu *app = [[NSMenu alloc] initWithTitle:@"Zelda-Mobile"];
     [app addItem:menu_item(@"Controls", @selector(toggleControls:), @",", NSEventModifierFlagCommand, actions)];
+    NSMenu *cloud = [[NSMenu alloc] initWithTitle:@"云存档"];
+    MAC_CLOUD_SAVE.statusItem = menu_item(cloudSaveSyncIsConfigured() ? @"云存档：已关联" : @"云存档：未关联", nil, @"", 0, nil);
+    [cloud addItem:MAC_CLOUD_SAVE.statusItem];
+    [cloud addItem:menu_item(@"关联云存档文件夹…", @selector(linkFolder:), @"", 0, MAC_CLOUD_SAVE)];
+    [cloud addItem:menu_item(@"上传已保存进度", @selector(uploadSave:), @"", 0, MAC_CLOUD_SAVE)];
+    [cloud addItem:menu_item(@"取消启动同步", @selector(cancelPull:), @"", 0, MAC_CLOUD_SAVE)];
+    [cloud addItem:menu_item(@"取消关联", @selector(unlinkFolder:), @"", 0, MAC_CLOUD_SAVE)];
+    NSMenuItem *cloudItem = [[NSMenuItem alloc] initWithTitle:cloud.title action:nil keyEquivalent:@""];
+    cloudItem.submenu = cloud; [app addItem:cloudItem];
     NSMenu *camera = [[NSMenu alloc] initWithTitle:@"究极手视角"];
     for (int mode = 1; mode >= 0; mode--) {
         NSMenuItem *item = menu_item(mode ? @"直接视角" : @"模拟右摇杆", @selector(ultrahandCamera:), @"", 0, actions);
@@ -306,6 +331,9 @@ void front_run(void (*guest)(void)) {
         window.collectionBehavior = NSWindowCollectionBehaviorFullScreenPrimary;
         ZeldaWindowDelegate *delegate = [ZeldaWindowDelegate new];
         window.delegate = delegate;
+        NSApp.delegate = delegate;
+        MAC_CLOUD_SAVE = [MacCloudSaveController new];
+        MAC_CLOUD_SAVE.window = window;
         ZeldaMenu *actions = [ZeldaMenu new]; actions.window = window;
         // Sound used to be saved in user defaults; carry it into the settings file once.
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
@@ -605,15 +633,19 @@ void front_run(void (*guest)(void)) {
         [NSApp activateIgnoringOtherApps:YES];
         gamepad_start(); gamepad_active(window.keyWindow);
         guest_entry = guest;
-        shader_prep_begin(window.contentView, metal_layer.device, ^{
-            performance_start(window, !zelda_settings().hide_performance);
-            controls_start(window);
-            pthread_attr_t attr;
-            if (pthread_attr_init(&attr) || pthread_attr_setstacksize(&attr, 8 << 20)) abort();
-            pthread_t thread;
-            if (pthread_create(&thread, &attr, run_guest, NULL)) abort();
-            pthread_attr_destroy(&attr); pthread_detach(thread);
-        });
+        [MAC_CLOUD_SAVE startAfterPull:^{
+            shader_prep_begin(window.contentView, metal_layer.device, ^{
+                if (MAC_CLOUD_SAVE.quitting) return;
+                MAC_CLOUD_SAVE.guestStarted = YES;
+                performance_start(window, !zelda_settings().hide_performance);
+                controls_start(window);
+                pthread_attr_t attr;
+                if (pthread_attr_init(&attr) || pthread_attr_setstacksize(&attr, 8 << 20)) abort();
+                pthread_t thread;
+                if (pthread_create(&thread, &attr, run_guest, NULL)) abort();
+                pthread_attr_destroy(&attr); pthread_detach(thread);
+            });
+        }];
         [NSApp run];
     }
 }

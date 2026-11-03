@@ -12,7 +12,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "e17cbb5c0365ef4f95f883327d9410dc53719d8c58302d1acc137d9ed56d2ed1",
+        "sha256": "7d579b3ca49153e7dec9a2f6250951f10c00896a5f3f83d805ad3c0b5f43865b",
         "mode": 420
       }
     },
@@ -22,7 +22,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "f94c5dfe9a3ad16dcd616d9cd06065b4a9be5e73d7f4d9e103eaa3743b0771b6",
+        "sha256": "cf031f6baa1ae1641089e54becda4269fa5e59f75622aaa76b21191ee00f0ac9",
         "mode": 420
       }
     },
@@ -46,6 +46,26 @@
         "mode": 420
       }
     },
+    "docs/saves.md": {
+      "base": {
+        "sha256": "9e024a88bd0c444fe9cb77fdc8344abf0a3d2908075f463cd095573644c091dc",
+        "mode": 420
+      },
+      "overlay": {
+        "sha256": "9385f062a6dcf6f61b3dc5a9895330583b08012a409673bce6164aafc263ce83",
+        "mode": 420
+      }
+    },
+    "docs/saves.zh-CN.md": {
+      "base": {
+        "sha256": "3ade0513bc027403055c3fa30030de7aee8f523e3c9044944e50b9ea3f5e8d68",
+        "mode": 420
+      },
+      "overlay": {
+        "sha256": "5fcaf7f1778572411951c6533d061e14c3c64264bbba3caec966e3e8f816e0ef",
+        "mode": 420
+      }
+    },
     "host/action_file_watcher.h": {
       "base": null,
       "overlay": {
@@ -63,28 +83,55 @@
     "host/action_layout.h": {
       "base": null,
       "overlay": {
-        "sha256": "4d774c2b8f6aaeafd7eab33bf13917cae25d078adc204c429e65154422fdc33f",
+        "sha256": "1fd2af491d4f5a62b762176706cea3508643b04fde525b744343c3cd35fd0a30",
         "mode": 420
       }
     },
     "host/action_layout.inc": {
       "base": null,
       "overlay": {
-        "sha256": "c5bb6d367f1d5a519a6d090d2b19819137059425465a48fdd1144317128c2649",
+        "sha256": "9e35dc269f7b72e626506cb9b8d2607a78588c784111c23ca56e32d1c3a028f3",
+        "mode": 420
+      }
+    },
+    "host/audio_mixer.c": {
+      "base": {
+        "sha256": "501865643eb94ae83d1fc3d5f1cab60d0fe723e1b0e5d6c70a65097bbebb36b3",
+        "mode": 420
+      },
+      "overlay": {
+        "sha256": "51cd59a352e1220846f4cc1a68e32037edb023cfa08e00de49426650dd465a16",
+        "mode": 420
+      }
+    },
+    "host/audio_voice.h": {
+      "base": {
+        "sha256": "0c85c0094a74ac1bf4bfb09a7c441473d9f7d6dada382eebfb07bffb9c2132da",
+        "mode": 420
+      },
+      "overlay": {
+        "sha256": "6d24b140283b6c7683a73bd4c2b1fb60487cb48322c4e0dd36c72784de600f51",
+        "mode": 420
+      }
+    },
+    "host/audio_wave_window.h": {
+      "base": null,
+      "overlay": {
+        "sha256": "183b5ab9ea80a2799bf343ae1574b463ed5df65fe605c9eeaa48b9a3921109bd",
         "mode": 420
       }
     },
     "host/camera_controller.h": {
       "base": null,
       "overlay": {
-        "sha256": "21be887c1ca90b8e656b240d184dcf36a75a7abb8ec07e967f07ec12a6cb792c",
+        "sha256": "b62ffbf8c820df00599cb7f98cab109fdde73b503b75bdd48e1056d7f2275e6a",
         "mode": 420
       }
     },
     "host/camera_controller.inc": {
       "base": null,
       "overlay": {
-        "sha256": "20c33b4066a677c1e25e5ee4d45b993e1f8394962ae651bc18f0d8def473991f",
+        "sha256": "ac95e54b33d3cf22889a15a5c86188369c238cb961a136fce307fa8cf09f0ac0",
         "mode": 420
       }
     },
@@ -151,7 +198,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "8a6e4b41a0ba26ba160fad98d67d1b7873e6d804f1fc84494adea32f366ab9a2",
+        "sha256": "36a04ee68d51e74766bf71665f171139c2d1d42ae305f306e8a05a0c91233ac5",
         "mode": 420
       }
     },
@@ -161,7 +208,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "84c64c7d07ac0d5c3f874b63a41830cb46fb8fc987b26e22d98073785c24daf4",
+        "sha256": "fd339cb4af705b8887d28576ad56f46a6915beefea7503aa61a1411c6ecf4464",
         "mode": 420
       }
     },
@@ -171,7 +218,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "e09bce19c8c5234c26b027d5521b5df0b23529cf9c43dfd5a102a5c89f095e9a",
+        "sha256": "5f193836e6b1cb0350a6f9a7a2c6cabf9d6ba62ba8b5aedd25f19056872c297c",
         "mode": 420
       }
     },
@@ -185,17 +232,38 @@
         "mode": 420
       }
     },
+    "host/ios_pipeline_cache.inc": {
+      "base": null,
+      "overlay": {
+        "sha256": "b83ed38110c48ecefbfbe9665d28ab7afe75746becf9c24e86fce2c6dca09f1b",
+        "mode": 420
+      }
+    },
+    "host/ios_shader_ir.inc": {
+      "base": null,
+      "overlay": {
+        "sha256": "24b63600ad80f2cfa87aee52d1c7489121ec6d2f9635584852c128ebb4a67c0a",
+        "mode": 420
+      }
+    },
+    "host/mac_cloud_save.inc": {
+      "base": null,
+      "overlay": {
+        "sha256": "2d230fa7fc07e0e03f465a49c64ea0e238a4fb22c170cf33103bfbe51442520d",
+        "mode": 420
+      }
+    },
     "host/native_prompt_overlay.inc": {
       "base": null,
       "overlay": {
-        "sha256": "0658a9b12988a2ffa8db2edb8921261a56dffd77205ed3eef7c8ec3a900b3553",
+        "sha256": "2d971c128f866e6e7a1538825d356477c469b738f3216351dea87840fdba6ea1",
         "mode": 420
       }
     },
     "host/native_ui.inc": {
       "base": null,
       "overlay": {
-        "sha256": "fdf879a95efe1c5718f4ca8395359067705af20481a796fd743b18f1c3cbca8b",
+        "sha256": "942360efe2d994997fd8e07f5fa0322ea04256b333a5dd9bc230201450bd8d0f",
         "mode": 420
       }
     },
@@ -215,7 +283,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "0374f273e4b0f669048706f5ee84376b82c1a7d09086903eb2a983b200ebbf7a",
+        "sha256": "b13a3c818e332538a40bfd12daa4a0d464695e1309b32d599ab3ac31fce27a60",
         "mode": 420
       }
     },
@@ -255,7 +323,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "05cfdc2f195eb13413d117bb6200488171b9c43ddf5405f35f9b56e7e1f15d8f",
+        "sha256": "9dc363f80528d7d629e7d74971adbcef2e3dafe17ef8441af47ace19a849faa7",
         "mode": 420
       }
     },
@@ -272,7 +340,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "fff52ce35ddbb255cec77e9dfd4bb7ab5778dfd62d5834b7f64619718a61b0c6",
+        "sha256": "5b97e9ebe166ead44875b00d97cec4d687d9376c35c5c5849d4c2fdc262949d1",
         "mode": 420
       }
     },
@@ -282,7 +350,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "101c53aca4feb57e011faf9b7a8421fc93f16cfa6066d911c4ca37fa51adaa0c",
+        "sha256": "da2432fc2e90ab095e170501037a2a49ae7cd29194863f54168393979d7eaa9c",
         "mode": 420
       }
     },
@@ -302,7 +370,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "d5fd1170020cfc40c6885ed7e3c2d17aa681d2c531fdea3b5ffe7d6ef3ec928b",
+        "sha256": "5ce10bc826af5cd67218572b07da697fa756462edf36b80ae00fbbb7c54adf82",
         "mode": 420
       }
     },
@@ -332,7 +400,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "551e6f42e315456962c724dadf013e670834e21a22c7477391397b505cc444bd",
+        "sha256": "6f763a89bb856648a663c4238212cf6c543f0b4f88744f38cf8af40a7cd21e44",
         "mode": 420
       }
     },
@@ -342,7 +410,14 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "d43b1349981dda5f45ddda4948b5b815c512a8b8af4d6e188683963953f7e6c1",
+        "sha256": "2a60d48f920f1eeddfca761d3c725ddac2080156104b5b432bf5e8fd3f8c748a",
+        "mode": 420
+      }
+    },
+    "host/nvn_library_cache.inc": {
+      "base": null,
+      "overlay": {
+        "sha256": "ecfaeb21a5e2ef28d1ecdb8f452d4527ae62a63ad770b1835e2fd0245e05763d",
         "mode": 420
       }
     },
@@ -362,7 +437,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "abbe0109ea05a78b86fa9d56af078602551b1049d1f05deaf50d76915e05b841",
+        "sha256": "92d4bb91859bdf5b4814bbad1a4b332acc5ba78a461c686d95e84a33a2df651e",
         "mode": 420
       }
     },
@@ -382,7 +457,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "de070a485345e0871168bd67ccf0f433b0c160d28211196607373dcf6d412302",
+        "sha256": "9c8e5ae005df4c6dd5bda773661af24bd925e3934fd2544af141971c9b2bf5bc",
         "mode": 420
       }
     },
@@ -416,6 +491,26 @@
         "mode": 420
       }
     },
+    "host/nvn_shader_prefetch.inc": {
+      "base": {
+        "sha256": "8523e6f6e1c37d64d11b8fe418f578fc91930b3c9002e296e95c291d3d27a20c",
+        "mode": 420
+      },
+      "overlay": {
+        "sha256": "58aace8c21c7bd34bbaccac9f4cfa42b9eac8e88ba3a801223fcdbfd4740a8a8",
+        "mode": 420
+      }
+    },
+    "host/nvn_shader_warm.inc": {
+      "base": {
+        "sha256": "729240b101e3ef8935e13569a78c4f384fc9e43aed89363682c0f93326f51542",
+        "mode": 420
+      },
+      "overlay": {
+        "sha256": "1f2f833303c99302cc896929dcdefabbcb934f305e16a4fbc2bad7b833fcbed2",
+        "mode": 420
+      }
+    },
     "host/nvn_texture_alias.inc": {
       "base": {
         "sha256": "1d93fb9ec21d56f5ef19dc85ec57b6f74bc28b3ba0612b11c6286f076802eac7",
@@ -432,7 +527,14 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "d6cdf01a7674d8340d1961eb608782e0bd6760eb0638fa81094fa9a1721117f7",
+        "sha256": "a6015a82d90deb5257876e2a89f9b3ebb427143b0d61e36f0b253e080e5365c3",
+        "mode": 420
+      }
+    },
+    "host/nvn_upload_lifetime.inc": {
+      "base": null,
+      "overlay": {
+        "sha256": "776cdca2f08d21f8041775c420ae6e5bd2cc97c946ef973352ec461901c4f909",
         "mode": 420
       }
     },
@@ -446,20 +548,27 @@
         "mode": 420
       }
     },
+    "host/pipeline_cache.inc": {
+      "base": null,
+      "overlay": {
+        "sha256": "4c4880a55ce1a852f4fb020cb77273e04015c135979d3682c46eea09dc69b2fe",
+        "mode": 420
+      }
+    },
     "host/probe.c": {
       "base": {
         "sha256": "0950dbc64d713603db15697c8bdc08f62e9ba18dbae99de95fa49e61f15153d8",
         "mode": 420
       },
       "overlay": {
-        "sha256": "09cd0fba15073267b5f1f2eab95ad303a879508f50bd28c90633638e08767d95",
+        "sha256": "4a655e598985f745aaca5463f56ed5b924811434dd4dc896b3260be1bd887d79",
         "mode": 420
       }
     },
     "host/screen_aspect.h": {
       "base": null,
       "overlay": {
-        "sha256": "e0b3c35c0200b547456d7fd5d685bf1a98d9532a16015259ffc542aff77dea14",
+        "sha256": "dd783a0c0e004c40cfbd87306be574336cc7253b46d61660123a2c27a940607b",
         "mode": 420
       }
     },
@@ -470,13 +579,30 @@
         "mode": 420
       }
     },
+    "host/shader_compile_policy.h": {
+      "base": null,
+      "overlay": {
+        "sha256": "5cc070c9583ef4072d8e950000d76e2e79c3b50e061fa1ed90e8f8128c087f93",
+        "mode": 420
+      }
+    },
+    "host/shader_ir.inc": {
+      "base": {
+        "sha256": "53d2c6462d3aa19b057ab95282d912ac9ba253ffe8df088949d00f4fb22e9406",
+        "mode": 420
+      },
+      "overlay": {
+        "sha256": "cb422c6513088ef864727edd936e0d3bffc8cbe854732a769eb81566954b235b",
+        "mode": 420
+      }
+    },
     "host/shader_prep.m": {
       "base": {
         "sha256": "d8cfd127ab11cf9a7b42a3b9f29ff3e1dd4c28f55596e170f030b65c5848a1e5",
         "mode": 420
       },
       "overlay": {
-        "sha256": "4bd6f34cb439dbe9db819fac7faab9b7d9afd8f39df605dbb009399444d67058",
+        "sha256": "0626a97dc5ca30493693e859ba51775b68d9e5615dfc4baaa5f004fdd5ae4cdb",
         "mode": 420
       }
     },
@@ -496,7 +622,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "a4381b5fc285b1bc422c06cc97c69fe69e51ff686f47d998d21e41e1c562b26f",
+        "sha256": "1b7cc0ead9dc0c9f112e2fb1f10f22fa7eb7ec2b19e916f7abfc42210950850f",
         "mode": 420
       }
     },
@@ -510,7 +636,7 @@
     "ios/cloud_save_sync.m": {
       "base": null,
       "overlay": {
-        "sha256": "ba6a95fcaddaa69db66118de271ad8cd3a50e1de59830b08d55abe2b3e458d1c",
+        "sha256": "99cc104f92346435a2454274c4d63ef40ca436b1318dd894192f2cb6ba38c500",
         "mode": 420
       }
     },
@@ -520,7 +646,28 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "94f7668a77affa4baa441742766e7d982f0f70acfd32ecbc4bfa158279928753",
+        "sha256": "7f8b1566b9f0ac6b8e734ce9e2c459a559f65dd7d29844dad0d89f8ab1827af5",
+        "mode": 420
+      }
+    },
+    "ios/shader_support_cache.inc": {
+      "base": null,
+      "overlay": {
+        "sha256": "2a180a615418d3f23e508385f89c5dd76b861bebecfc9cd237faf10181a0090e",
+        "mode": 420
+      }
+    },
+    "ios/tablet_touch_layout.h": {
+      "base": null,
+      "overlay": {
+        "sha256": "60d5a5212e77e7767822ffcb6bcc8b5d1e099c954302f0d72782f427f0ed4c15",
+        "mode": 420
+      }
+    },
+    "ios/touch_controls.inc": {
+      "base": null,
+      "overlay": {
+        "sha256": "428caa194b42d7847e445bc63c67eb947163bc071ab622f85daa1ce6b0243333",
         "mode": 420
       }
     },
@@ -530,7 +677,7 @@
         "mode": 493
       },
       "overlay": {
-        "sha256": "cec6aebd701765d1312f7f05335398135d5c41607b97cd0b8a1ba504f98c216c",
+        "sha256": "27d4183706026fa9b56af8fbdf5d7fade91046bf7e97048e4de1341781b4f10f",
         "mode": 493
       }
     },
@@ -550,7 +697,7 @@
         "mode": 493
       },
       "overlay": {
-        "sha256": "af3e79aa0d4b7cbd078433c5e2645f39cbfcdc1ae180d2ede2a4cbb32fb14310",
+        "sha256": "7e807644dc2bda6c2d61eea081433dd8a2504e4b967c15e845bb34d75db093d4",
         "mode": 493
       }
     },
@@ -567,14 +714,21 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "262a918f74044071f6de7636e96633609366194c9968f3f6b103ebb78495cbad",
+        "sha256": "e0dc1b3b1f7d01139196048b577c3b937cdde46b1e1841e4adcc03032b3f0b6b",
+        "mode": 420
+      }
+    },
+    "script/prepare_ios_shader_ir.py": {
+      "base": null,
+      "overlay": {
+        "sha256": "1310757f2bdf44ffdd2f989990cd92ac7ab031e504daecbbbac8a8464c85be81",
         "mode": 420
       }
     },
     "script/prepare_ios_shader_support.py": {
       "base": null,
       "overlay": {
-        "sha256": "e71c55975f9be4189107fa3ea8bf2cd7df8fd97633c14fcb107b200ee0a4ddfb",
+        "sha256": "62219effc92ac3a1b20069d63041576dbab472b7309918e6268ffd4e9e8340dc",
         "mode": 420
       }
     },
@@ -608,7 +762,7 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "9820fccdd55dc8062cf089cbb76013288547faa23d0034bc1937e84c5966ca33",
+        "sha256": "9ef9c42c08e22d0e5ef4240b89b8065c9ad09674e17d5b1e699dfcf5a1b42e34",
         "mode": 420
       }
     },
@@ -618,42 +772,76 @@
         "mode": 493
       },
       "overlay": {
-        "sha256": "a8ff4bed9357937d42279202e93126f6984b2b2585a405320d0618c994230aba",
+        "sha256": "b5cd4c347002d410b9a7a9e95df531133ade389b5aa4bac125d3e96bc760a421",
+        "mode": 493
+      }
+    },
+    "script/test_ios_touch_controls.sh": {
+      "base": null,
+      "overlay": {
+        "sha256": "6a19966c26489c20a5a6be28cc31e8c4178b051597ede7042cacdb0a22ec3859",
         "mode": 493
       }
     },
     "script/test_metal3.sh": {
       "base": null,
       "overlay": {
-        "sha256": "48cae838cc3efc664768bc78e6ce51c214d403b455c92ef3d43721f5286bb902",
+        "sha256": "f28b46e58ad0daef136e89bb18b9751faab899ad62d2c650fbe2d89099473ae0",
         "mode": 420
       }
     },
     "tests/test_action_layout.c": {
       "base": null,
       "overlay": {
-        "sha256": "b5a327f740553460f469fccd650323547750c1bcc6e1af01386c639c9ce9cb31",
+        "sha256": "a672950f1b05106fe26dd6ea26fb66ecceb57bf9a10d97fcbab8768aa961c882",
+        "mode": 420
+      }
+    },
+    "tests/test_audio.c": {
+      "base": {
+        "sha256": "263392211767697123d80ef8b8545a0943d3be281a4a7a9087bf7a71a2d26901",
+        "mode": 420
+      },
+      "overlay": {
+        "sha256": "ff7f0bfed4cf288cb79c5dad02e6a07c495b3e3291318c1483a465399ad6a79f",
         "mode": 420
       }
     },
     "tests/test_camera_controller.c": {
       "base": null,
       "overlay": {
-        "sha256": "fffd102dc38ec418cc407e9bba651021d2806a1290360760b20d95a7497481b7",
+        "sha256": "737a243ce95f78fa4e296b8f0a97664dc441d8cdb28502e9e0d6bbeafd40bc01",
         "mode": 420
       }
     },
     "tests/test_camera_hook.py": {
       "base": null,
       "overlay": {
-        "sha256": "e1bd96988105b8df6d6d95e526e0b879a233bfb45ef8cc3bdec71e48bb76c12f",
+        "sha256": "73d32db3106af89747037b816f8807ca88fb60e7e04e935780fea4d40a95c40d",
         "mode": 420
       }
     },
     "tests/test_cloud_save_sync.m": {
       "base": null,
       "overlay": {
-        "sha256": "49af81603eb83036c2d83f81dc5f3797552867364375267e139f42ddce5f78b0",
+        "sha256": "19327aeee2d1fba9e105ca9bb49dcd5b49921d09789527db796b9e5cd44adaa5",
+        "mode": 420
+      }
+    },
+    "tests/test_desktop_updates.py": {
+      "base": null,
+      "overlay": {
+        "sha256": "95da74850cbff7f749ee2daf7a1e2c0938b06d16c25783e49b6fd89036c2db0e",
+        "mode": 420
+      }
+    },
+    "tests/test_display.c": {
+      "base": {
+        "sha256": "9293b067b628ea9602647e440cd97dee13c78974f34790e6ee80c804cef16daa",
+        "mode": 420
+      },
+      "overlay": {
+        "sha256": "3bde8c1a5a5900d7a9fcdaca05becb29d698900ca239ecb28f0083bd00612ad7",
         "mode": 420
       }
     },
@@ -690,42 +878,91 @@
         "mode": 420
       },
       "overlay": {
-        "sha256": "db89f0fc2d9f865c3c0a75b307c5bf69704b338373591080ae6c31b7ba80d912",
+        "sha256": "113776e2ee51e6eff7962e18357363de655d4cecfed2246638e17cb4ae5c8883",
         "mode": 420
       }
     },
     "tests/test_haptic_routing.m": {
       "base": null,
       "overlay": {
-        "sha256": "73af6541888fb0cc011b3799348e29bf7178dae3985e62c1e204afbcf629d484",
+        "sha256": "649ac88d3a0fe1124e97672cc16118248ed6c96abf8378143a5960f2421d361b",
         "mode": 420
       }
     },
     "tests/test_ios_config.py": {
       "base": null,
       "overlay": {
-        "sha256": "f014b37d5ee85f98f81217f3aaf4ae5060a56b42a178063b6b795c89329239f5",
+        "sha256": "aaa03c88ab85b341af40b512b617d2380451c69d83da7755027273b929a0450a",
+        "mode": 420
+      }
+    },
+    "tests/test_ios_pipeline_cache.m": {
+      "base": null,
+      "overlay": {
+        "sha256": "c513c60abea55576a8ff8628482c65429ddb31dd102a26f442381c7130ea5466",
+        "mode": 420
+      }
+    },
+    "tests/test_ios_shader_cache.m": {
+      "base": null,
+      "overlay": {
+        "sha256": "fbc3f12fd1680ee11e26db3e751e409d9882cdec908b9fca92f7f630cf8d7963",
+        "mode": 420
+      }
+    },
+    "tests/test_ios_shader_ir.py": {
+      "base": null,
+      "overlay": {
+        "sha256": "5845ac5dce4ff240e720bdd04ab257dbfa361180fd57cea37ace4f5be65539ce",
+        "mode": 420
+      }
+    },
+    "tests/test_ios_shader_ir_loader.m": {
+      "base": null,
+      "overlay": {
+        "sha256": "b4ae4b5c09618e3b666fe2d935e566fbd266554428f09b194e463452592e160a",
         "mode": 420
       }
     },
     "tests/test_ios_shader_support.py": {
       "base": null,
       "overlay": {
-        "sha256": "462dcafe6b4715dde8a656c5c282a37c19f4b241c8d732547d84362b16385426",
+        "sha256": "86d058cdf022737f1ccd04bb9ccebdd0d15bd5f1f2b9812dc9db242001db7a61",
+        "mode": 420
+      }
+    },
+    "tests/test_ios_touch_controls.m": {
+      "base": null,
+      "overlay": {
+        "sha256": "cf93a80b8b604bcb9a555192d6d125f6998484091e75c5a2a0e9e2bd3698d34c",
+        "mode": 420
+      }
+    },
+    "tests/test_mac_cloud_save.m": {
+      "base": null,
+      "overlay": {
+        "sha256": "12983dbba4bc3d85790bb0d2cef17c83e0981ddccb9c8cd8b6970127efcc50eb",
         "mode": 420
       }
     },
     "tests/test_native_ui.c": {
       "base": null,
       "overlay": {
-        "sha256": "47503ddb6339d404ab1386cdc4cd7b2ab629d63713707eb2633d79ceebcaa229",
+        "sha256": "3041cae99f6a13d3f07b90d0a73a4c6ef99aa8688f9140a568cfa43f2e249f41",
         "mode": 420
       }
     },
     "tests/test_native_ui_hook.py": {
       "base": null,
       "overlay": {
-        "sha256": "8f4f46e4a18e2fb9d2c41145c85311fe97514c592a41a590946bb0d537294f57",
+        "sha256": "400b07ceb8ee19f4ed614409d8ac1a51fea0def5e9ceedd381274ba2968d918e",
+        "mode": 420
+      }
+    },
+    "tests/test_nvn_library_cache.m": {
+      "base": null,
+      "overlay": {
+        "sha256": "be7976e705a5e5896fe5a26cbae5f07b3e87fff67154c03c4d4877d0e98a65c0",
         "mode": 420
       }
     },
@@ -753,7 +990,7 @@
     "tests/test_nvn_m3_predicate.m": {
       "base": null,
       "overlay": {
-        "sha256": "e37d0185dcb4d8983e610398febaf3ca77e1f74bc598b67455ae0ab9c9d6552a",
+        "sha256": "2f60f9ca504c7f6a629b1081f5ef7edba0f7d5eb73cf23f3ca488d2abf294c59",
         "mode": 420
       }
     },
@@ -761,6 +998,16 @@
       "base": null,
       "overlay": {
         "sha256": "0e4a5fbde9e55ed64b3e2c6bfd2730ba0c653379e3aa57202d926488072a65d4",
+        "mode": 420
+      }
+    },
+    "tests/test_nvn_shader_warm.m": {
+      "base": {
+        "sha256": "a9af1ee7770a1a96e633379a48438092604cfc5448a31d4bcc970abbcf7e26b2",
+        "mode": 420
+      },
+      "overlay": {
+        "sha256": "55158df7c8ef06ad5183963b0eaeddf291ca13ff5ca62c3c8a86cfc430b29802",
         "mode": 420
       }
     },
@@ -784,7 +1031,41 @@
     "tests/test_screen_aspect.c": {
       "base": null,
       "overlay": {
-        "sha256": "bd1ab7aeec34ba9a3a64313e35aa93df360c87fcf332801a6ba105d6ddec4a9c",
+        "sha256": "8ba179ebb720fd17613e503368c743e87da1b2fae037afd72ead0d60c774298b",
+        "mode": 420
+      }
+    },
+    "tests/test_shader_compile_policy.m": {
+      "base": null,
+      "overlay": {
+        "sha256": "f648dd54e8f7cd8628414206c6057516ce8038528b4a1add7e57f4d463954ad8",
+        "mode": 420
+      }
+    },
+    "tests/test_shader_ir.py": {
+      "base": {
+        "sha256": "04bfcabfd46d83d980f3e719965c30068dbf8fce9312d422c339de0f30c09796",
+        "mode": 420
+      },
+      "overlay": {
+        "sha256": "2851d4895165506d470546e4d9eb9fd69a7ec106c1d2ac1cea66ec9e9f196a7e",
+        "mode": 420
+      }
+    },
+    "tests/test_shader_pairs.py": {
+      "base": {
+        "sha256": "eee946261a2e50795540dde6ac6d6b0b4ec6b68d4d77a8e07ab91b05a3678e36",
+        "mode": 420
+      },
+      "overlay": {
+        "sha256": "26aec63f0f96d5b241ca6d36d05571d9e19527bb5d80766d75d2ae5c168e1982",
+        "mode": 420
+      }
+    },
+    "tests/test_tablet_touch_layout.c": {
+      "base": null,
+      "overlay": {
+        "sha256": "d9fb4dd3d3c146d9c94bc2522206e1589b69e270d35210d14f7680898c108b7c",
         "mode": 420
       }
     },
@@ -815,14 +1096,14 @@
     "tools/camera_hook.py": {
       "base": null,
       "overlay": {
-        "sha256": "41ca04d69114e5bbc08eb87988c5a6ba924a034dbc5311a9c5a4bd94894e60e5",
+        "sha256": "9c314b2d2250a1da04f6ad5bb642efa77114c7c7edd14df191b3fcaeade7200a",
         "mode": 420
       }
     },
     "tools/native_ui_hook.py": {
       "base": null,
       "overlay": {
-        "sha256": "e87ae118f56ff230cc09dae5fdbd6fb5160e55d41bc10a48f7348548c740c379",
+        "sha256": "17319c44fa17eef5253edaed7c9539cb739ecd56bc6538907874073931e47067",
         "mode": 420
       }
     },
@@ -2506,20 +2787,12 @@
       "sha256": "375acc97c5d98c366689660c606b45367afe0385fe14a688617968e540c96031",
       "mode": 420
     },
-    "host/audio_mixer.c": {
-      "sha256": "501865643eb94ae83d1fc3d5f1cab60d0fe723e1b0e5d6c70a65097bbebb36b3",
-      "mode": 420
-    },
     "host/audio_mixer.h": {
       "sha256": "342b9aed867e1568f476c52780f58aaad15542f44ccbe720760a8532460c2445",
       "mode": 420
     },
     "host/audio_output.inc": {
       "sha256": "c480f9256e2784fa55c66d9adbfb3cc560907f34ee1c3c915d4751aac2efb695",
-      "mode": 420
-    },
-    "host/audio_voice.h": {
-      "sha256": "0c85c0094a74ac1bf4bfb09a7c441473d9f7d6dada382eebfb07bffb9c2132da",
       "mode": 420
     },
     "host/codec.c": {
@@ -2710,16 +2983,8 @@
       "sha256": "217b10cfb717df492db2fc1e8cf715331ee8681b502c27b90fef3df945eaea13",
       "mode": 420
     },
-    "host/nvn_shader_prefetch.inc": {
-      "sha256": "8523e6f6e1c37d64d11b8fe418f578fc91930b3c9002e296e95c291d3d27a20c",
-      "mode": 420
-    },
     "host/nvn_shader_variant.inc": {
       "sha256": "1626c1c25ed9fd027418e8ff807990bd09a3ae56d7524bb2f0b6029d39b8b764",
-      "mode": 420
-    },
-    "host/nvn_shader_warm.inc": {
-      "sha256": "729240b101e3ef8935e13569a78c4f384fc9e43aed89363682c0f93326f51542",
       "mode": 420
     },
     "host/nvn_small_texture.inc": {
@@ -2816,10 +3081,6 @@
     },
     "host/settings.m": {
       "sha256": "339e3edfa9a9e8cd3f04b97b8599d0bd802457a30c4f694296eaa86f4fe234ff",
-      "mode": 420
-    },
-    "host/shader_ir.inc": {
-      "sha256": "53d2c6462d3aa19b057ab95282d912ac9ba253ffe8df088949d00f4fb22e9406",
       "mode": 420
     },
     "host/shader_key.h": {

@@ -1,3 +1,4 @@
+#include "ios_pipeline_cache.inc"
 #include "shader_status.h"
 #include "nvn_query_msl.h"
 #if DM_NVN_M3
@@ -128,7 +129,7 @@ static void zelda_query_flush(void) {
     static id<MTLComputePipelineState> pipeline;
     if (!pipeline) {
         NSError *error = nil;
-        pipeline = ZELDA_SHADER_BUILD([g_dev newComputePipelineStateWithFunction:[z_query_library newFunctionWithName:@"query_sum"] error:&error]);
+        pipeline = ZELDA_SHADER_BUILD(cachedComputePipeline(g_dev, [z_query_library newFunctionWithName:@"query_sum"], &error));
         if (!pipeline) MDIE("GPU counter pipeline failed: %s", error.localizedDescription.UTF8String);
     }
     // Metal 4's copy encoder can also dispatch; keep adjacent query work in this encoder.
@@ -203,7 +204,7 @@ static void zelda_color_clear_alone(MTLRenderPassColorAttachmentDescriptor *atta
         d.vertexFunction = [z_query_library newFunctionWithName:@"clear_vertex"];
         d.fragmentFunction = [z_query_library newFunctionWithName:@"clear_if"];
         d.colorAttachments[0].pixelFormat = target.pixelFormat;
-        NSError *error = nil; pipeline = ZELDA_SHADER_BUILD([g_dev newRenderPipelineStateWithDescriptor:d error:&error]);
+        NSError *error = nil; pipeline = ZELDA_SHADER_BUILD(cachedRenderPipeline(g_dev, d, &error));
         if (!pipeline) MDIE("Conditional clear pipeline failed: %s", error.localizedDescription.UTF8String);
         pipelines[key] = pipeline;
     }

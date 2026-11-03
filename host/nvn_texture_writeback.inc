@@ -1,3 +1,4 @@
+#include "ios_pipeline_cache.inc"
 #if DM_NVN_M3
 static void zelda_rendered_writeback(void) {}
 #else
@@ -36,7 +37,6 @@ static int zelda_writeback_format(const tex_t *t, id<MTLTexture> texture) {
 #if !TARGET_OS_IPHONE
         case MTLPixelFormatDepth24Unorm_Stencil8: case MTLPixelFormatX24_Stencil8:
 #endif
-#endif
         case MTLPixelFormatDepth32Float_Stencil8: case MTLPixelFormatX32_Stencil8: return 0;
         default: return 1;
     }
@@ -45,7 +45,7 @@ static id<MTLComputePipelineState> zelda_writeback_pipeline(id<MTL4ArgumentTable
     static id<MTLComputePipelineState> pipeline; static id<MTL4ArgumentTable> arguments; static int failed;
     if (!pipeline && !failed) {
         NSError *error = nil; id<MTLFunction> f = [ZELDA_SHADER_BUILD([g_dev newLibraryWithSource:@(zelda_writeback_msl) options:nil error:&error]) newFunctionWithName:@"zwb_scatter"];
-        pipeline = f ? ZELDA_SHADER_BUILD([g_dev newComputePipelineStateWithFunction:f error:&error]) : nil;
+        pipeline = f ? ZELDA_SHADER_BUILD(cachedComputePipeline(g_dev, f, &error)) : nil;
         MTL4ArgumentTableDescriptor *d = [MTL4ArgumentTableDescriptor new]; d.maxBufferBindCount = 2;
         arguments = pipeline ? [g_dev newArgumentTableWithDescriptor:d error:&error] : nil;
         if (!arguments) { failed = 1; MLOG("ERROR: Texture writeback kernel: %s", error.localizedDescription.UTF8String); }
@@ -129,4 +129,5 @@ static void zelda_rendered_writeback(void) {
              (unsigned long long)atomic_load(&g_cur_frame));
     }
 }
+#endif // ZELDA_WRITEBACK_ANALYSIS_ONLY
 #endif

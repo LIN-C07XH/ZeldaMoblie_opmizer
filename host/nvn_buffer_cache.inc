@@ -9,7 +9,8 @@ static struct { uint64_t source, length; uint8_t bytes[256]; } z_uniform_cache[6
 static unsigned z_index_count, z_uniform_count;
 // CPU conditional-render fallback: words sampled after a completed GPU fence stay valid until a
 // writer touches them. Keeping the words (rather than a bool) also handles changes in comparison mode.
-static struct { uint64_t source, words[4]; unsigned valid; } z_predicate_cache[64];
+enum { ZELDA_PREDICATE_CACHE_CAPACITY = 512 };
+static struct { uint64_t source, words[4]; unsigned valid; } z_predicate_cache[ZELDA_PREDICATE_CACHE_CAPACITY];
 static unsigned z_predicate_count;
 static uint64_t z_predicate_forwarded;
 static uint64_t z_buffer_submit, z_buffer_queue, z_buffer_registry;

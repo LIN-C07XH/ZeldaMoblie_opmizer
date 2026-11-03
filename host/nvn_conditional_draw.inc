@@ -1,3 +1,4 @@
+#include "ios_pipeline_cache.inc"
 #include "shader_status.h"
 #include "nvn_conditional_draw.h"
 static uint64_t z_conditional_draws, z_conditional_batches, z_conditional_fallbacks;
@@ -180,7 +181,7 @@ static uint64_t zelda_conditional_encode(const zelda_conditional_input *input, u
     if (!pipeline) {
         NSError *error = nil;
         id<MTLLibrary> library = ZELDA_SHADER_BUILD([g_dev newLibraryWithSource:@(zelda_conditional_msl) options:nil error:&error]);
-        pipeline = ZELDA_SHADER_BUILD([g_dev newComputePipelineStateWithFunction:[library newFunctionWithName:@"conditional_draw"] error:&error]);
+        pipeline = ZELDA_SHADER_BUILD(cachedComputePipeline(g_dev, [library newFunctionWithName:@"conditional_draw"], &error));
         MTL4ArgumentTableDescriptor *d = [MTL4ArgumentTableDescriptor new]; d.maxBufferBindCount = 2;
         table = [g_dev newArgumentTableWithDescriptor:d error:&error];
         if (!pipeline || !table) MDIE("Conditional draw pipeline failed: %s", error.localizedDescription.UTF8String);

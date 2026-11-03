@@ -58,28 +58,25 @@ target_link_libraries(ZeldaMobile PRIVATE "${VPX}/lib/libvpx.a" "${VPX}/lib/libo
   "-framework UIKit" "-framework Foundation" "-framework QuartzCore" "-framework CoreGraphics"
   "-framework CoreVideo" "-framework Metal" "-framework MetalFX"
   "-framework ImageIO" "-framework UniformTypeIdentifiers" "-framework AudioToolbox"
-  "-framework AVFAudio" "-framework GameController" "-framework CoreHaptics")
+  "-framework AVFAudio" "-framework GameController" "-framework CoreHaptics" z)
 foreach(MODULE main subsdk0 sdk)
   target_link_options(ZeldaMobile PRIVATE "-Wl,-segprot,__DM${MODULE}W,rw,rw")
 endforeach()
 file(GLOB MODULE_TABLES "${ROOT}/work/patched/*.tsv")
 target_sources(ZeldaMobile PRIVATE ${MODULE_TABLES})
 set_source_files_properties(${MODULE_TABLES} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/patched")
-file(GLOB_RECURSE MOVIE_SHADERS CONFIGURE_DEPENDS "${IOS_WORK}/shader-support/*")
 if(NOT EXISTS "${IOS_WORK}/shader-support/manifest.json")
   message(FATAL_ERROR "Run script/prepare_ios_shader_support.py before configuring iOS")
 endif()
-foreach(SHADER ${MOVIE_SHADERS})
-  file(RELATIVE_PATH SHADER_RELATIVE "${IOS_WORK}/shader-support" "${SHADER}")
-  get_filename_component(SHADER_FOLDER "${SHADER_RELATIVE}" DIRECTORY)
-  target_sources(ZeldaMobile PRIVATE "${SHADER}")
-  set_source_files_properties("${SHADER}" PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/shader-support/${SHADER_FOLDER}")
-endforeach()
+if(NOT EXISTS "${IOS_WORK}/shader-ir/manifest.json")
+  message(FATAL_ERROR "Run script/prepare_ios_shader_ir.py before configuring iOS")
+endif()
+# The support set includes all offline scene variants. Copy it once before code
+# signing; individual Xcode resource phases duplicate thousands of small files.
 add_custom_command(TARGET ZeldaMobile POST_BUILD
-  COMMAND "${CMAKE_COMMAND}" -E copy_directory "${IOS_WORK}/shader-support" "$<TARGET_BUNDLE_DIR:ZeldaMobile>/shader-support"
-  COMMAND "${ROOT}/work/venv/bin/python" "${ROOT}/script/prepare_ios_shader_support.py"
-          --verify-bundle "$<TARGET_BUNDLE_DIR:ZeldaMobile>"
-  COMMENT "Copy and verify complete iOS movie shader support" VERBATIM)
+  COMMAND "${ROOT}/work/venv/bin/python" "${ROOT}/script/prepare_ios_shader_support.py" --install-bundle
+  COMMAND "${ROOT}/work/venv/bin/python" "${ROOT}/script/prepare_ios_shader_ir.py" --install-bundle
+  COMMENT "Pack and verify iOS shader sources and precompiled libraries" VERBATIM)
 configure_file("/System/Library/Fonts/Supplemental/AppleGothic.ttf" "${IOS_WORK}/shared.ttf" COPYONLY)
 target_sources(ZeldaMobile PRIVATE "${IOS_WORK}/shared.ttf")
 set_source_files_properties("${IOS_WORK}/shared.ttf" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)

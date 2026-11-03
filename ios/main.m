@@ -32,6 +32,8 @@
 #include "action_file_watcher.h"
 #include "action_file_watcher.inc"
 #include "native_prompt_overlay.inc"
+#include "touch_controls.inc"
+#include "tablet_touch_layout.h"
 
 #ifndef MTLGPUFamilyMetal4
 #define MTLGPUFamilyMetal4 ((MTLGPUFamily)5002)
@@ -48,75 +50,28 @@ static UIButton *cloudCancelButton;
 static UIButton *cloudFolderButton;
 static BOOL performance_expanded = NO;
 static NSLayoutConstraint *performance_width;
-static UIStackView *control_toolbar, *fallback_toolbar;
+static UIStackView *control_toolbar;
+static UIView *fallback_toolbar;
+static NSMutableArray<UIButton *> *fallback_buttons;
 static UIButton *retry_button, *control_mode_button, *confirm_button, *aspect_button, *detach_button;
 static _Atomic int selected_screen_aspect = ASPECT_MODE_NATIVE_WIDE;
 int front_screen_aspect_mode(void) { return atomic_load(&selected_screen_aspect); }
 static BOOL full_touch_controller;
-static unsigned touch_controller_generation;
 static ZeldaCPUUsage cpu_usage;
 static BOOL launched, guest_running;
 static uint32_t vsync_write, vsync_read;
 static pthread_mutex_t vsync_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void (*resource_report)(uint32_t, const char *);
 static NSString *documents;
-static GCVirtualController *touch_controller;
+static ZeldaTouchStick *left_touch_stick, *right_touch_stick;
 
 static void disconnect_touch_controller(void) {
-    touch_controller_generation++;
-    touch_controller.controller.extendedGamepad.valueChangedHandler = nil;
-    touch_controller.controller.extendedGamepad.leftThumbstick.valueChangedHandler = nil;
-    [touch_controller disconnect];
-    touch_controller = nil;
-    gamepad_set_virtual_controller(NULL);
+    [left_touch_stick reset]; [right_touch_stick reset];
     inputTouchControllerClear();
 }
 static void connect_touch_controller(void) {
-    if (touch_controller) return;
-    GCVirtualControllerConfiguration *config = [GCVirtualControllerConfiguration new];
-    config.elements = full_touch_controller ? [NSSet setWithArray:@[
-        GCInputLeftThumbstick, GCInputRightThumbstick,
-        GCInputButtonA, GCInputButtonB, GCInputButtonX, GCInputButtonY,
-        GCInputLeftShoulder, GCInputRightShoulder, GCInputLeftTrigger, GCInputRightTrigger]] :
-        [NSSet setWithObject:GCInputLeftThumbstick];
-    GCVirtualController *created = [[GCVirtualController alloc] initWithConfiguration:config];
-    touch_controller = created;
-    unsigned generation = ++touch_controller_generation;
-    [created connectWithReplyHandler:^(NSError *error) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (generation != touch_controller_generation || created != touch_controller) {
-                created.controller.extendedGamepad.valueChangedHandler = nil;
-                [created disconnect];
-                return;
-            }
-            if (error) {
-                fprintf(stderr, "TOUCH controller failed code=%ld; use persistent menu buttons or retry mode switch\n", (long)error.code);
-                touch_controller = nil; return;
-            }
-            GCController *controller = created.controller;
-            gamepad_set_virtual_controller((__bridge void *)controller);
-            inputNoteDevice(INPUT_DEVICE_TOUCH);
-            controller.extendedGamepad.valueChangedHandler = ^(GCExtendedGamepad *pad, GCControllerElement *element) {
-                (void)element;
-                if (generation != touch_controller_generation) return;
-                if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) { inputTouchControllerClear(); return; }
-                if (!full_touch_controller) {
-                    inputTouchStick(pad.leftThumbstick.xAxis.value, pad.leftThumbstick.yAxis.value); return;
-                }
-                uint64_t buttons = 0;
-                if (pad.buttonA.pressed) buttons |= PAD_BTN_A;
-                if (pad.buttonB.pressed) buttons |= PAD_BTN_B;
-                if (pad.buttonX.pressed) buttons |= PAD_BTN_X;
-                if (pad.buttonY.pressed) buttons |= PAD_BTN_Y;
-                if (pad.leftShoulder.pressed) buttons |= PAD_BTN_L;
-                if (pad.rightShoulder.pressed) buttons |= PAD_BTN_R;
-                if (pad.leftTrigger.pressed) buttons |= PAD_BTN_ZL;
-                if (pad.rightTrigger.pressed) buttons |= PAD_BTN_ZR;
-                inputTouchController(buttons, pad.leftThumbstick.xAxis.value, pad.leftThumbstick.yAxis.value,
-                    pad.rightThumbstick.xAxis.value, pad.rightThumbstick.yAxis.value);
-            };
-        });
-    }];
+    // Custom sticks produce input only, with no system-controller haptics.
+    inputNoteDevice(INPUT_DEVICE_TOUCH);
 }
 
 // Keep titles textual even when an older user layout still contains emoji.
@@ -153,13 +108,7 @@ static void status(NSString *text) {
     dispatch_async(dispatch_get_main_queue(), ^{ status_label.text = text; });
 }
 
-static NSString *movieShaderDigest(NSData *data) {
-    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
-    CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
-    NSMutableString *hex = [NSMutableString stringWithCapacity:sizeof(digest) * 2];
-    for (unsigned i = 0; i < sizeof(digest); i++) [hex appendFormat:@"%02x", digest[i]];
-    return hex;
-}
+#include "shader_support_cache.inc"
 
 void front_run(void (*guest)(void)) {
     if (cloudSaveSyncIsConfigured()) {
@@ -181,44 +130,17 @@ void front_run(void (*guest)(void)) {
     NSString *directory = [[documents stringByAppendingPathComponent:@"work/shaders"]
         stringByAppendingPathComponent:@"b-" DMSH_CHAIN];
     NSString *supportRoot = [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"shader-support"];
-    NSString *support = [supportRoot stringByAppendingPathComponent:@"b-" DMSH_CHAIN];
-    NSFileManager *fm = NSFileManager.defaultManager;
-    NSData *manifestData = [NSData dataWithContentsOfFile:[supportRoot stringByAppendingPathComponent:@"manifest.json"]];
-    id manifest = manifestData ? [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:nil] : nil;
-    NSArray *supportFiles = [manifest isKindOfClass:NSDictionary.class] ? manifest[@"files"] : nil;
-    if (![supportFiles isKindOfClass:NSArray.class] || !supportFiles.count ||
-        [manifest[@"version"] integerValue] != 1 || ![manifest[@"chain"] isEqual:@DMSH_CHAIN]) {
-        status(@"缺少视频着色器支持资源，请重新构建 iOS 应用。");
+    NSError *supportError = nil;
+    status(@"Checking graphics resources…");
+    CFAbsoluteTime supportBegan = CFAbsoluteTimeGetCurrent();
+    if (!prepareIosShaderSupport(supportRoot, directory, @DMSH_CHAIN, &supportError)) {
+        fprintf(stderr, "IOS_MOVIE_SHADER failed %s\n", supportError.localizedDescription.UTF8String);
+        status(supportError.localizedDescription ?: @"图形资源准备失败。");
         return;
     }
-    [fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:nil];
-    for (NSDictionary *entry in supportFiles) {
-        NSString *file = [entry isKindOfClass:NSDictionary.class] ? entry[@"name"] : nil;
-        if (![file isKindOfClass:NSString.class] || ![file.lastPathComponent isEqual:file]) {
-            status(@"视频着色器支持资源清单无效，请重新构建 iOS 应用。");
-            return;
-        }
-        NSData *source = [NSData dataWithContentsOfFile:[support stringByAppendingPathComponent:file]];
-        if (!source.length || source.length != [entry[@"size"] unsignedLongLongValue] ||
-            ![movieShaderDigest(source) isEqual:entry[@"sha256"]]) {
-            fprintf(stderr, "IOS_MOVIE_SHADER invalid bundle resource %s\n", file.UTF8String);
-            status(@"视频着色器支持资源不完整，请重新构建 iOS 应用。");
-            return;
-        }
-        NSString *destination = [directory stringByAppendingPathComponent:file];
-        if (![source isEqualToData:[NSData dataWithContentsOfFile:destination]]) {
-            NSError *error = nil;
-            if (![source writeToFile:destination options:NSDataWritingAtomic error:&error]) {
-                fprintf(stderr, "IOS_MOVIE_SHADER copy failed code=%ld\n", (long)error.code);
-                status(@"视频着色器资源无法准备，请检查可用空间后重启。");
-                return;
-            }
-            fprintf(stderr, "IOS_MOVIE_SHADER installed %s\n", file.UTF8String);
-        }
-    }
-    fprintf(stderr, "IOS_MOVIE_SHADER verified chain=%s files=%lu\n", DMSH_CHAIN, (unsigned long)supportFiles.count);
+    fprintf(stderr, "IOS_SHADER_SUPPORT seconds=%.3f\n", CFAbsoluteTimeGetCurrent() - supportBegan);
     CFAbsoluteTime began = CFAbsoluteTimeGetCurrent();
-    fprintf(stderr, "SHADER_PREP begin chain=%s scope=needed platform=ios\n", DMSH_CHAIN);
+    fprintf(stderr, "SHADER_PREP begin chain=%s scope=on-demand platform=ios\n", DMSH_CHAIN);
     unsigned failed = shader_prep_run(metal_layer.device, directory, ^(unsigned count, unsigned total) {
         if (!(count % 500) || count == total) fprintf(stderr, "SHADER_PREP progress=%u/%u physical_gib=%.3f available_mib=%.1f\n",
             count,total,physical_gib(),os_proc_available_memory()/1048576.0);
@@ -227,6 +149,9 @@ void front_run(void (*guest)(void)) {
     fprintf(stderr, "SHADER_PREP end failed=%u seconds=%.3f\n", failed, CFAbsoluteTimeGetCurrent() - began);
     dispatch_sync(dispatch_get_main_queue(), ^{
         status_label.hidden = YES; guest_running = YES;
+        UIViewController *controller = status_label.window.rootViewController;
+        [controller setNeedsUpdateOfHomeIndicatorAutoHidden];
+        [controller setNeedsUpdateOfScreenEdgesDeferringSystemGestures];
         cloudCancelButton.hidden = YES;
         cloudFolderButton.hidden = YES;
         retry_button.hidden = YES;
@@ -293,7 +218,8 @@ static void start_game(void) {
     setenv("DM_NVN_SHMAP", [[shaders stringByAppendingPathComponent:@"shader_map.tsv"] fileSystemRepresentation], 1);
     setenv("DM_PSO_USER", [[shaders stringByAppendingPathComponent:@"pso_user.tsv"] fileSystemRepresentation], 1);
     setenv("DM_PSO_MANIFEST", "off", 1);
-    setenv("DM_NVN_TBDR", "0", 1);
+    const char *tbdrEnv = getenv("DM_NVN_TBDR");
+    setenv("DM_NVN_TBDR", tbdrEnv ? tbdrEnv : "0", 1);
     setenv("DM_PRESENT_LINK", "0", 1);
     if (!getenv("ZELDA_TIMEOUT_SECONDS")) setenv("ZELDA_TIMEOUT_SECONDS", "0", 1);
     audio_mute(zelda_settings().muted);
@@ -391,7 +317,8 @@ static void start_game(void) {
         cameraSetConfig(&config);
     }
     control_toolbar = [[UIStackView alloc] init];
-    control_toolbar.axis = UILayoutConstraintAxisHorizontal; control_toolbar.spacing = 6;
+    BOOL tablet = self.traitCollection.userInterfaceIdiom == UIUserInterfaceIdiomPad;
+    control_toolbar.axis = UILayoutConstraintAxisHorizontal; control_toolbar.spacing = tablet ? 8 : 6;
     control_toolbar.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:control_toolbar];
     NSNumber *savedAspect = [NSUserDefaults.standardUserDefaults objectForKey:@"ZELDA_SCREEN_ASPECT_MODE"];
@@ -399,17 +326,17 @@ static void start_game(void) {
     CGSize display = self.view.bounds.size;
     cameraSetDisplayAspect(front_screen_aspect_mode() == ASPECT_MODE_NATIVE_WIDE ?
         (float)(MAX(display.width, display.height) / MAX(1, MIN(display.width, display.height))) : 0);
-    NSArray *titles = @[@"确定", @"返回", @"地图", @"菜单", full_touch_controller ? @"手游模式" : @"虚拟手柄",
-        front_screen_aspect_mode() == ASPECT_MODE_NATIVE_WIDE ? @"原版比例" : @"宽屏视野"];
+    NSArray *titles = @[@"确定", @"返回", @"地图", @"菜单", full_touch_controller ? @"划屏视角" : @"双摇杆",
+        front_screen_aspect_mode() == ASPECT_MODE_NATIVE_WIDE ? @"完整画面" : @"宽屏视野"];
     const uint64_t masks[] = {PAD_BTN_A, PAD_BTN_B, PAD_BTN_MINUS, PAD_BTN_PLUS, 0, 0};
     for (unsigned i = 0; i < titles.count; i++) {
-        UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
+        UIButton *button = [ZeldaTouchButton buttonWithType:UIButtonTypeCustom];
         [button setTitle:titles[i] forState:UIControlStateNormal];
-        button.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+        button.titleLabel.font = [UIFont systemFontOfSize:tablet ? 16 : 14 weight:UIFontWeightSemibold];
         button.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:.60];
         button.layer.cornerRadius = 8; button.tag = (NSInteger)masks[i];
         [button.widthAnchor constraintEqualToConstant:i == 4 ? 88 : (i == 5 ? 72 : 48)].active = YES;
-        [button.heightAnchor constraintEqualToConstant:44].active = YES;
+        [button.heightAnchor constraintEqualToConstant:tablet ? 48 : 44].active = YES;
         if (i == 0) confirm_button = button;
         if (i == 4) {
             control_mode_button = button;
@@ -427,45 +354,45 @@ static void start_game(void) {
     [NSLayoutConstraint activateConstraints:@[
         [control_toolbar.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor constant:-12],
         [control_toolbar.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8]]];
-    fallback_toolbar = [UIStackView new];
-    fallback_toolbar.axis = UILayoutConstraintAxisHorizontal; fallback_toolbar.spacing = 6;
-    fallback_toolbar.translatesAutoresizingMaskIntoConstraints = NO;
+    fallback_toolbar = [UIView new];
     fallback_toolbar.hidden = YES;
+    fallback_buttons = [NSMutableArray array];
     [self.view addSubview:fallback_toolbar];
-    NSArray *fallbackTitles = @[@"盾牌", @"材料", @"口哨", @"武器", @"蹲下", @"望远"];
-    const uint64_t fallbackMasks[] = {PAD_BTN_D_LEFT, PAD_BTN_D_UP, PAD_BTN_D_DOWN, PAD_BTN_D_RIGHT, PAD_BTN_L3, PAD_BTN_R3};
+    NSArray *fallbackTitles = @[@"盾牌", @"材料", @"口哨", @"武器", @"蹲下", @"望远", @"拆解"];
+    const uint64_t fallbackMasks[] = {PAD_BTN_D_LEFT, PAD_BTN_D_UP, PAD_BTN_D_DOWN, PAD_BTN_D_RIGHT, PAD_BTN_L3, PAD_BTN_R3, 0};
     for (unsigned i = 0; i < fallbackTitles.count; i++) {
-        UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
+        UIButton *button = [ZeldaTouchButton buttonWithType:UIButtonTypeCustom];
         [button setTitle:fallbackTitles[i] forState:UIControlStateNormal];
-        button.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-        button.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:.65];
-        button.layer.cornerRadius = 8; button.tag = (NSInteger)fallbackMasks[i];
-        [button.widthAnchor constraintEqualToConstant:i < 4 ? 44 : 52].active = YES;
-        [button.heightAnchor constraintEqualToConstant:44].active = YES;
-        [button addTarget:self action:@selector(onPersistentButtonDown:) forControlEvents:UIControlEventTouchDown];
-        [button addTarget:self action:@selector(onPersistentButtonUp:) forControlEvents:UIControlEventTouchUpInside|UIControlEventTouchUpOutside|UIControlEventTouchCancel];
+        button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+        [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+        button.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:.48];
+        button.layer.cornerRadius = 12; button.layer.borderWidth = 1;
+        button.layer.borderColor = [UIColor colorWithWhite:1 alpha:.35].CGColor;
+        button.tag = (NSInteger)fallbackMasks[i];
+        button.frame = CGRectMake((i % 4)*54, (i / 4)*54, 48, 44);
+        if (i == 6) {
+            detach_button = button;
+            [button addTarget:self action:@selector(detachUltrahandObject:) forControlEvents:UIControlEventTouchUpInside];
+        } else {
+            [button addTarget:self action:@selector(onPersistentButtonDown:) forControlEvents:UIControlEventTouchDown];
+            [button addTarget:self action:@selector(onPersistentButtonUp:) forControlEvents:UIControlEventTouchUpInside|UIControlEventTouchUpOutside|UIControlEventTouchCancel];
+        }
         if (button.tag & (PAD_BTN_D_LEFT | PAD_BTN_D_RIGHT | PAD_BTN_D_UP)) {
             UIPanGestureRecognizer *selection = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleEquipmentPan:)];
             selection.maximumNumberOfTouches = 1; selection.cancelsTouchesInView = NO;
             [button addGestureRecognizer:selection];
             button.accessibilityHint = @"按住并左右滑动选择";
         }
-        [fallback_toolbar addArrangedSubview:button];
+        [fallback_toolbar addSubview:button];
+        [fallback_buttons addObject:button];
     }
-    detach_button = [UIButton buttonWithType:UIButtonTypeCustom];
-    [detach_button setTitle:@"拆解" forState:UIControlStateNormal];
-    detach_button.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-    detach_button.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:.65];
-    detach_button.layer.cornerRadius = 8;
-    detach_button.accessibilityHint = @"晃动右摇杆，拆下究极手抓住的装配部件";
-    [detach_button.widthAnchor constraintEqualToConstant:44].active = YES;
-    [detach_button.heightAnchor constraintEqualToConstant:44].active = YES;
-    [detach_button addTarget:self action:@selector(detachUltrahandObject:) forControlEvents:UIControlEventTouchUpInside];
-    detach_button.hidden = YES;
-    [fallback_toolbar addArrangedSubview:detach_button];
-    [NSLayoutConstraint activateConstraints:@[
-        [fallback_toolbar.centerXAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.centerXAnchor],
-        [fallback_toolbar.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8]]];
+    left_touch_stick = [[ZeldaTouchStick alloc] initWithFrame:CGRectZero];
+    right_touch_stick = [[ZeldaTouchStick alloc] initWithFrame:CGRectZero];
+    right_touch_stick.accessibilityLabel = @"Camera stick";
+    for (ZeldaTouchStick *stick in @[left_touch_stick,right_touch_stick]) {
+        [stick addTarget:self action:@selector(onTouchStick:) forControlEvents:UIControlEventValueChanged];
+        [self.view addSubview:stick];
+    }
     retry_button = [UIButton buttonWithType:UIButtonTypeSystem];
     [retry_button setTitle:@"重试" forState:UIControlStateNormal];
     retry_button.translatesAutoresizingMaskIntoConstraints = NO;
@@ -531,7 +458,7 @@ static void start_game(void) {
     __weak ZeldaController *weakSelf=self;
     self.monitor=[NSTimer scheduledTimerWithTimeInterval:1 repeats:YES block:^(NSTimer *timer){(void)timer;[weakSelf updatePerformance];}];
     [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationWillResignActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note){
-        (void)note; [weakSelf releaseAllActionButtons]; inputTouchControllerClear(); cameraReset(); weakSelf.isPanTracking = NO;
+        (void)note; [weakSelf releaseAllActionButtons]; disconnect_touch_controller(); inputTouchControllerClear(); cameraReset(); weakSelf.isPanTracking = NO;
     }];
     [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note){
         (void)note;
@@ -549,7 +476,7 @@ static void start_game(void) {
         });
     }];
     [NSNotificationCenter.defaultCenter addObserverForName:GCControllerDidDisconnectNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note){
-        if (note.object != touch_controller.controller) inputNoteDevice(INPUT_DEVICE_TOUCH);
+        (void)note; inputNoteDevice(INPUT_DEVICE_TOUCH);
     }];
 }
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gesture shouldReceiveTouch:(UITouch *)touch {
@@ -591,6 +518,13 @@ static void start_game(void) {
         CGPoint delta = [gesture translationInView:self.view];
         [gesture setTranslation:CGPointZero inView:self.view];
         if (delta.x != 0 || delta.y != 0) inputNoteDevice(INPUT_DEVICE_TOUCH);
+        if (self.traitCollection.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
+            UIEdgeInsets safe = self.view.safeAreaInsets;
+            UiSafeAreaInsets insets = {safe.top, safe.left, safe.bottom, safe.right};
+            TabletTouchLayout layout = tabletTouchLayout(self.view.bounds.size.width, self.view.bounds.size.height, &insets);
+            delta.x *= layout.lookScaleX;
+            delta.y *= layout.lookScaleY;
+        }
         cameraAddTouchDelta((float)delta.x, (float)delta.y);
     } else if (gesture.state == UIGestureRecognizerStateEnded || gesture.state == UIGestureRecognizerStateCancelled) {
         self.isPanTracking = NO;
@@ -599,7 +533,7 @@ static void start_game(void) {
 
 - (void)handleEquipmentPan:(UIPanGestureRecognizer *)gesture {
     UIButton *button = (UIButton *)gesture.view;
-    if (full_touch_controller || !guest_running) return;
+    if (!guest_running) return;
     if (gesture.state == UIGestureRecognizerStateBegan) [self onPersistentButtonDown:button];
     if (gesture.state == UIGestureRecognizerStateBegan || gesture.state == UIGestureRecognizerStateChanged) {
         CGPoint delta = [gesture translationInView:self.view];
@@ -622,7 +556,7 @@ static void start_game(void) {
     for (int i = 0; i < cfg.buttonCount; i++) {
         LayoutButtonDef btnDef = cfg.buttons[i];
         if (!strcmp(btnDef.id, "interact_a")) hasInteraction = YES;
-        UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
+        UIButton *btn = [ZeldaTouchButton buttonWithType:UIButtonTypeCustom];
         btn.tag = i + 100;
         btn.layer.cornerRadius = MIN(btnDef.width, btnDef.height) * 0.5f;
         btn.layer.borderWidth = 1.8f;
@@ -652,7 +586,7 @@ static void start_game(void) {
         [self.view addSubview:btn];
         [self.dynamicActionButtons addObject:btn];
     }
-    inputSetTouchInteractionEnabled(hasInteraction && !full_touch_controller);
+    inputSetTouchInteractionEnabled(hasInteraction);
 }
 
 - (void)refreshDynamicButtonLayout {
@@ -663,17 +597,36 @@ static void start_game(void) {
     UiSafeAreaInsets insets = { (float)safe.top, (float)safe.left, (float)safe.bottom, (float)safe.right };
 
     LayoutConfig cfg = actionGetLayoutConfig();
+    BOOL tablet = self.traitCollection.userInterfaceIdiom == UIUserInterfaceIdiomPad;
+    BOOL tabletPreset = tablet && actionLayoutUsesMobileDefaults();
+    TabletTouchLayout tabletLayout = tabletTouchLayout(size.width, size.height, &insets);
     BOOL isLocked = cameraIsTargetLocked();
     BOOL ultrahand = cameraIsUltrahandActive();
     for (UIButton *button in control_toolbar.arrangedSubviews) button.enabled = guest_running || button == control_mode_button || button == aspect_button;
-    fallback_toolbar.hidden = !guest_running;
-    for (UIButton *button in fallback_toolbar.arrangedSubviews) {
-        button.enabled = guest_running;
-        if (button == detach_button) {
-            button.hidden = full_touch_controller || !ultrahand || inputGetDevice() == INPUT_DEVICE_GAMEPAD;
-            continue;
-        }
-        button.hidden = !full_touch_controller && !(button.tag & (PAD_BTN_D_LEFT | PAD_BTN_D_RIGHT | PAD_BTN_D_UP));
+    BOOL showTouch = guest_running && inputGetDevice() != INPUT_DEVICE_GAMEPAD;
+    if (!showTouch && !left_touch_stick.hidden) disconnect_touch_controller();
+    fallback_toolbar.hidden = !showTouch;
+    fallback_toolbar.frame = tablet ? CGRectMake(tabletLayout.auxiliaryX, tabletLayout.auxiliaryY,
+        3 * tabletLayout.auxiliarySize + 2 * tabletLayout.auxiliaryGap,
+        3 * tabletLayout.auxiliarySize + 2 * tabletLayout.auxiliaryGap) : CGRectMake(safe.left+12,safe.top+70,210,98);
+    for (NSUInteger i = 0; i < fallback_buttons.count; i++) {
+        UIButton *button = fallback_buttons[i];
+        CGFloat step = tabletLayout.auxiliarySize + tabletLayout.auxiliaryGap;
+        button.frame = tablet ? CGRectMake((i % 3) * step, (i / 3) * step, tabletLayout.auxiliarySize, tabletLayout.auxiliarySize) :
+            CGRectMake((i % 4) * 54, (i / 4) * 54, 48, 44);
+        button.titleLabel.font = [UIFont systemFontOfSize:tablet ? 15 : 13 weight:UIFontWeightSemibold];
+        button.enabled = guest_running && (button != detach_button || ultrahand);
+        button.alpha = button.enabled ? 1 : .4;
+        ((ZeldaTouchButton *)button).contextActive = button == detach_button && ultrahand;
+    }
+    left_touch_stick.hidden = !showTouch;
+    right_touch_stick.hidden = !showTouch || !full_touch_controller;
+    left_touch_stick.enabled = right_touch_stick.enabled = guest_running;
+    left_touch_stick.frame = CGRectMake(safe.left+16,size.height-safe.bottom-146,128,128);
+    right_touch_stick.frame = CGRectMake(size.width-safe.right-414,size.height-safe.bottom-146,128,128);
+    if (tablet) {
+        left_touch_stick.frame = CGRectMake(tabletLayout.leftStickX, tabletLayout.stickY, tabletLayout.stickSize, tabletLayout.stickSize);
+        right_touch_stick.frame = CGRectMake(tabletLayout.rightStickX, tabletLayout.rightStickY, tabletLayout.stickSize, tabletLayout.stickSize);
     }
     performance_width.constant = performance_expanded ? MIN(260, MAX(130, size.width - safe.left - safe.right - 420)) : 130;
     InputInteractionPrompt prompt = {0};
@@ -683,11 +636,8 @@ static void start_game(void) {
     for (int i = 0; i < cfg.buttonCount; i++)
         if (!strcmp(cfg.buttons[i].id, "interact_a")) replacementAvailable = YES;
 
-    // A real native action gets the middle-right slot; otherwise A remains in
-    // the menu toolbar, including title screens with no camera/UI bridge yet.
-    BOOL contextual = guest_running && !full_touch_controller && replacementAvailable && hasPrompt && inputGetDevice() == INPUT_DEVICE_TOUCH;
-    if (contextual && !confirm_button.hidden) [self onPersistentButtonUp:confirm_button];
-    confirm_button.hidden = contextual;
+    // The A slot stays in one position, including menus and missing prompts.
+    confirm_button.hidden = replacementAvailable;
 
     for (NSUInteger i = 0; i < self.dynamicActionButtons.count && (int)i < cfg.buttonCount; i++) {
         UIButton *btn = self.dynamicActionButtons[i];
@@ -700,17 +650,21 @@ static void start_game(void) {
             btn.accessibilityHint = ultrahand ? @"按住并滑动旋转物体" : @"切换锁定目标";
         }
 
+        if (tabletPreset) btnDef = tabletTouchButton(btnDef, tabletLayout.scale, full_touch_controller);
         ComputedButtonRect rect = actionComputeButtonRect(&btnDef, (float)size.width, (float)size.height, &insets);
+        if (tabletPreset) {
+            btn.titleLabel.font = [UIFont systemFontOfSize:rect.width >= 80 ? 19 : 16 weight:UIFontWeightBold];
+            if (!btn.highlighted && !((ZeldaTouchButton *)btn).contextActive)
+                btn.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:.48];
+        }
         // Bounds/center remain well-defined during the pressed scale animation.
         btn.bounds = CGRectMake(0, 0, rect.width, rect.height);
         btn.center = CGPointMake(rect.x + rect.width * .5, rect.y + rect.height * .5);
         btn.layer.cornerRadius = MIN(rect.width, rect.height) * 0.5f;
 
-        // 仅在游戏已载入且事件激活时显示
-        BOOL hidden = !guest_running || full_touch_controller || !rect.isVisible || inputGetDevice() == INPUT_DEVICE_GAMEPAD;
-        if (!gameplay && strcmp(btnDef.id, "interact_a")) hidden = YES;
+        // Standard controls remain available when the native UI bridge is idle.
+        BOOL hidden = !showTouch || !rect.isVisible;
         if (!strcmp(btnDef.id, "interact_a")) {
-            hidden |= !hasPrompt;
             NSString *title = hasPrompt ? touch_title([[NSString alloc] initWithCharacters:prompt.text length:prompt.length], @"操作") : @"确定";
             BOOL titleChanged = ![btn.currentTitle isEqualToString:title];
             if (titleChanged) [btn setTitle:title forState:UIControlStateNormal];
@@ -718,30 +672,23 @@ static void start_game(void) {
             if (held && (hidden || titleChanged || held.unsignedLongLongValue != (hasPrompt ? prompt.button : PAD_BTN_A)))
                 [self onActionButtonUp:btn];
         }
-        // The primary native action now owns glider availability; an in-air
-        // guide alone is insufficient to know whether the glider can open.
-        if (!strcmp(btnDef.id, "glider_x") && gameplay && replacementAvailable) hidden = YES;
         if (hidden && !btn.hidden) [self onActionButtonUp:btn];
         btn.hidden = hidden;
 
-        if (btnDef.padButton == PAD_BTN_ZL && isLocked) {
-            [btn setTitle:@"已锁定" forState:UIControlStateNormal];
-            // 锁敌激活时高亮
-            btn.backgroundColor = [UIColor colorWithRed:0.95 green:0.75 blue:0.15 alpha:0.88];
-            btn.layer.borderColor = [UIColor colorWithRed:1.0 green:0.9 blue:0.3 alpha:1.0].CGColor;
-        } else if (rect.isHighlighted || (gameplay && hasPrompt && !strcmp(btnDef.id, "interact_a"))) {
-            btn.backgroundColor = [UIColor colorWithRed:0.2 green:0.75 blue:0.95 alpha:0.88];
-            btn.layer.borderColor = [UIColor colorWithRed:0.4 green:0.9 blue:1.0 alpha:1.0].CGColor;
-        } else {
-            if (btnDef.padButton == PAD_BTN_ZL) [btn setTitle:touch_title(@(btnDef.title), @"注视") forState:UIControlStateNormal];
-            btn.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:0.62f];
-            btn.layer.borderColor = [UIColor colorWithWhite:1.0f alpha:0.45f].CGColor;
+        BOOL emphasized = rect.isHighlighted || (gameplay && hasPrompt && !strcmp(btnDef.id, "interact_a"));
+        if (btnDef.padButton == PAD_BTN_ZL) {
+            [btn setTitle:isLocked ? @"已锁定" : touch_title(@(btnDef.title), @"锁定") forState:UIControlStateNormal];
+            emphasized |= isLocked;
         }
+        if (!strcmp(btnDef.id,"jump_x")) [btn setTitle:(actionGetActiveEvents() & EVENT_MASK_IN_AIR) ? @"滑翔" : @"跳跃" forState:UIControlStateNormal];
+        ((ZeldaTouchButton *)btn).contextActive = emphasized;
     }
 }
 
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
+    CGSize display = self.view.bounds.size;
+    if (!guest_running) cameraSetDisplayAspect(front_screen_aspect_mode() == ASPECT_MODE_NATIVE_WIDE ? display.width/MAX(1,display.height) : 0);
     [self refreshDynamicButtonLayout];
 }
 
@@ -756,21 +703,17 @@ static void start_game(void) {
     if (!strcmp(btn.id, "interact_a")) {
         btn.isSpecialAction = false;
         InputInteractionPrompt prompt = {0};
-        if (!inputGetInteractionPrompt(&prompt)) return;
-        btn.padButton = prompt.button;
+        btn.padButton = inputGetInteractionPrompt(&prompt) ? prompt.button : PAD_BTN_A;
     }
     inputNoteDevice(INPUT_DEVICE_TOUCH);
 
-    [UIView animateWithDuration:0.08 animations:^{
-        sender.transform = CGAffineTransformMakeScale(0.92, 0.92);
-    }];
 
     if (btn.isSpecialAction) {
         if (btn.padButton == PAD_BTN_SPECIAL_SWITCH) {
             cameraSwitchTarget(1);
         }
     } else {
-        if (btn.padButton == PAD_BTN_ZL) {
+        if (btn.padButton == PAD_BTN_ZL && !full_touch_controller) {
             self.pressedActionButtons[@(sender.tag)] = @(btn.padButton);
             cameraHandleLockDragButton(true);
             [self refreshDynamicButtonLayout];
@@ -783,15 +726,13 @@ static void start_game(void) {
 
 - (void)detachUltrahandObject:(UIButton *)sender {
     (void)sender;
-    if (!guest_running || full_touch_controller) return;
+    if (!guest_running) return;
     inputNoteDevice(INPUT_DEVICE_TOUCH);
     cameraTriggerUltrahandDetach();
 }
 
 - (void)onActionButtonUp:(UIButton *)sender {
-    [UIView animateWithDuration:0.08 animations:^{
-        sender.transform = CGAffineTransformIdentity;
-    }];
+    sender.highlighted = NO;
 
     NSNumber *mask = self.pressedActionButtons[@(sender.tag)];
     if (mask.unsignedLongLongValue == PAD_BTN_ZL) cameraHandleLockDragButton(false);
@@ -817,6 +758,9 @@ static void start_game(void) {
 - (void)releaseAllActionButtons {
     for (NSNumber *mask in self.pressedActionButtons.allValues) inputTouchButton(mask.unsignedLongLongValue, false);
     [self.pressedActionButtons removeAllObjects];
+    for (UIButton *button in self.dynamicActionButtons) button.highlighted = NO;
+    for (UIButton *button in fallback_buttons) button.highlighted = NO;
+    for (UIButton *button in control_toolbar.arrangedSubviews) button.highlighted = NO;
     cameraHandleLockDragButton(false);
 }
 
@@ -861,6 +805,7 @@ static void start_game(void) {
     }
 }
 - (BOOL)prefersStatusBarHidden { return YES; }
+- (UIRectEdge)preferredScreenEdgesDeferringSystemGestures { return guest_running ? UIRectEdgeBottom : UIRectEdgeNone; }
 - (BOOL)prefersHomeIndicatorAutoHidden { return YES; }
 - (void)cancelCloudSyncAction:(UIButton *)button {
     (void)button;
@@ -884,6 +829,7 @@ static void start_game(void) {
 - (void)retryGame:(UIButton *)button { (void)button; start_game(); }
 - (void)onPersistentButtonDown:(UIButton *)button {
     if (!guest_running) return;
+    inputNoteDevice(INPUT_DEVICE_TOUCH);
     self.pressedActionButtons[@(button.tag + 10000)] = @((uint64_t)button.tag);
     inputTouchButton((uint64_t)button.tag, true);
 }
@@ -891,6 +837,17 @@ static void start_game(void) {
     NSNumber *mask = self.pressedActionButtons[@(button.tag + 10000)];
     [self.pressedActionButtons removeObjectForKey:@(button.tag + 10000)];
     if (mask && ![self.pressedActionButtons.allValues containsObject:mask]) inputTouchButton(mask.unsignedLongLongValue, false);
+}
+- (void)onTouchStick:(ZeldaTouchStick *)sender {
+    (void)sender;
+    if (!guest_running) return;
+    CGPoint left = left_touch_stick.axes, right = full_touch_controller ? right_touch_stick.axes : CGPointZero;
+    static unsigned reports;
+    if (reports < 4 && (left.x || left.y || right.x || right.y)) {
+        reports++;
+        fprintf(stderr,"TOUCH_STICK left=%.3f,%.3f right=%.3f,%.3f\n",left.x,left.y,right.x,right.y);
+    }
+    inputTouchController(0,left.x,left.y,right.x,right.y);
 }
 - (void)toggleScreenAspect:(UIButton *)button {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
@@ -900,15 +857,13 @@ static void start_game(void) {
     [defaults setInteger:mode forKey:@"ZELDA_SCREEN_ASPECT_MODE"];
     if (guest_running) {
         [button setTitle:mode == ASPECT_MODE_NATIVE_WIDE ? @"重启宽屏" : @"重启原版" forState:UIControlStateNormal];
-        button.accessibilityHint = @"下次启动应用时生效";
+        button.accessibilityHint = @"重启应用后按新比例创建渲染目标";
     } else {
         atomic_store(&selected_screen_aspect, mode);
         CGSize display = self.view.bounds.size;
-        cameraSetDisplayAspect(mode == ASPECT_MODE_NATIVE_WIDE ?
-            (float)(MAX(display.width, display.height) / MAX(1, MIN(display.width, display.height))) : 0);
-        [button setTitle:mode == ASPECT_MODE_NATIVE_WIDE ? @"原版比例" : @"宽屏视野" forState:UIControlStateNormal];
-        [self.view setNeedsLayout];
-        [self.nativePrompts setNeedsDisplay];
+        cameraSetDisplayAspect(mode == ASPECT_MODE_NATIVE_WIDE ? display.width/MAX(1,display.height) : 0);
+        [button setTitle:mode == ASPECT_MODE_NATIVE_WIDE ? @"完整画面" : @"宽屏视野" forState:UIControlStateNormal];
+        [self.view setNeedsLayout]; [self.nativePrompts setNeedsDisplay];
     }
 }
 - (void)toggleTouchControls:(UIButton *)button {
@@ -917,7 +872,7 @@ static void start_game(void) {
     disconnect_touch_controller();
     full_touch_controller = !full_touch_controller;
     [NSUserDefaults.standardUserDefaults setBool:full_touch_controller forKey:@"ZELDA_TOUCH_FULL_CONTROLLER"];
-    [button setTitle:full_touch_controller ? @"手游模式" : @"虚拟手柄" forState:UIControlStateNormal];
+    [button setTitle:full_touch_controller ? @"划屏视角" : @"双摇杆" forState:UIControlStateNormal];
     inputNoteDevice(INPUT_DEVICE_TOUCH);
     [self setupDynamicActionButtons];
     [self refreshDynamicButtonLayout];
@@ -939,8 +894,20 @@ static void start_game(void) {
         action.state = cameraGetConfig().nativeUltrahand == direct ? UIMenuElementStateOn : UIMenuElementStateOff;
         [actions addObject:action];
     }
-    control_mode_button.menu = [UIMenu menuWithTitle:@"视角控制" children:actions];
-    control_mode_button.accessibilityHint = @"点击切换虚拟手柄；长按设置究极手视角";
+    UIAction *test = [UIAction actionWithTitle:@"测试游戏震动" image:nil identifier:nil handler:^(UIAction *action) {
+        (void)action; inputNoteDevice(INPUT_DEVICE_TOUCH);
+        gamepad_test_vibration();
+    }];
+    [actions addObject:test];
+    UIAction *vibration = [UIAction actionWithTitle:zelda_settings().vibration ? @"关闭游戏震动" : @"开启游戏震动" image:nil identifier:nil handler:^(UIAction *action) {
+        (void)action;
+        zelda_settings_t settings = zelda_settings(); settings.vibration = !settings.vibration;
+        gamepad_vibration_mode(settings.vibration); zelda_settings_store(settings);
+        [weakSelf refreshCameraControlMenu];
+    }];
+    [actions addObject:vibration];
+    control_mode_button.menu = [UIMenu menuWithTitle:@"触控与震动" children:actions];
+    control_mode_button.accessibilityHint = @"点击切换视角摇杆；长按设置视角与游戏震动";
 }
 - (void)togglePerformance:(UIButton *)button {
     (void)button; performance_expanded = !performance_expanded; [self updatePerformance];

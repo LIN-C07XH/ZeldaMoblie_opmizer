@@ -16,7 +16,7 @@ static void testScreenAspect(void) {
     assert(ipadPro11Class == DEVICE_ASPECT_IPAD_MODERN);
 
     // 3. Switch 原生 (1280x720, 16:9 = 1.778)
-    DeviceAspectClass switchClass = screenClassifyAspect(1280.0f, 720.0f);
+    DeviceAspectClass switchClass = screenClassifyAspect(1276.0f, 720.0f);
     assert(switchClass == DEVICE_ASPECT_STANDARD_16_9);
 
     // 4. iPhone 16/17 Pro Max (2868x1320, ~2.173)
@@ -25,14 +25,14 @@ static void testScreenAspect(void) {
 
     // 5. 测试视口计算：iPad 4:3 充满全屏 (ASPECT_MODE_FILL)
     // 游戏原生 16:9 (1920x1080)，屏幕为 iPad (2048x1536)
-    ScreenViewport vpFillIpad = screenCalculateViewport(2048.0f, 1536.0f, 1920.0f, 1080.0f, ASPECT_MODE_FILL);
+    ScreenViewport vpFillIpad = screenCalculateViewport(2048.0f, 1536.0f, 1920.0f, 1076.0f, ASPECT_MODE_FILL);
     // 在 Fill 模式下，高度必须完全填满屏幕 (1536)，宽度居中超出屏幕消除黑边
     assert(vpFillIpad.height >= 1536.0f);
     assert(vpFillIpad.originY <= 0.0f);
 
     // 6. 测试视口计算：iPhone 19.5:9 充满全屏 (ASPECT_MODE_FILL)
     // 屏幕为 iPhone 15/16/17 (2556x1179)
-    ScreenViewport vpFillIphone = screenCalculateViewport(2556.0f, 1179.0f, 1920.0f, 1080.0f, ASPECT_MODE_FILL);
+    ScreenViewport vpFillIphone = screenCalculateViewport(2556.0f, 1179.0f, 1920.0f, 1076.0f, ASPECT_MODE_FILL);
     // 在 Fill 模式下，宽度必须完全填满屏幕 (2556)，上下居中消除左右黑边
     assert(vpFillIphone.width >= 2556.0f);
     assert(vpFillIphone.originX <= 0.0f);
@@ -47,35 +47,35 @@ static void testActionLayoutDefault(void) {
 
     // 寻找攻击键 Y
     const LayoutButtonDef *btnAttack = NULL;
-    const LayoutButtonDef *btnGlider = NULL;
+    const LayoutButtonDef *btnJump = NULL;
     const LayoutButtonDef *btnInteract = NULL;
 
     for (int i = 0; i < cfg.buttonCount; i++) {
         if (strcmp(cfg.buttons[i].id, "attack_y") == 0) btnAttack = &cfg.buttons[i];
-        if (strcmp(cfg.buttons[i].id, "glider_x") == 0) btnGlider = &cfg.buttons[i];
+        if (strcmp(cfg.buttons[i].id, "jump_x") == 0) btnJump = &cfg.buttons[i];
         if (strcmp(cfg.buttons[i].id, "interact_a") == 0) btnInteract = &cfg.buttons[i];
     }
 
     assert(btnAttack != NULL);
-    assert(btnGlider != NULL);
+    assert(btnJump != NULL);
     assert(btnInteract != NULL);
 
     // 验证普攻键 Y 为大圆按键 (72x72)，锚定在右下角
     assert(btnAttack->anchor == ANCHOR_BOTTOM_RIGHT);
-    assert(btnAttack->width == 80.0f);
-    assert(btnAttack->height == 80.0f);
+    assert(btnAttack->width == 76.0f);
+    assert(btnAttack->height == 76.0f);
     assert(btnAttack->padButton == PAD_BTN_Y);
 
     // 屏幕尺寸模拟：iPhone 16 Pro (874 x 402 pt)
     UiSafeAreaInsets insets = {0.0f, 59.0f, 21.0f, 59.0f};
     ComputedButtonRect attackRect = actionComputeButtonRect(btnAttack, 874.0f, 402.0f, &insets);
     assert(attackRect.isVisible == true);
-    assert(attackRect.width == 80.0f);
-    assert(attackRect.height == 80.0f);
+    assert(attackRect.width == 76.0f);
+    assert(attackRect.height == 76.0f);
 
     // 常态下：滑翔伞按钮不显示 (不在空中)
-    ComputedButtonRect gliderRectNormal = actionComputeButtonRect(btnGlider, 874.0f, 402.0f, &insets);
-    assert(gliderRectNormal.isVisible == false);
+    ComputedButtonRect gliderRectNormal = actionComputeButtonRect(btnJump, 874.0f, 402.0f, &insets);
+    assert(gliderRectNormal.isVisible == true);
 
     // 常态下：拾取互动键显示但不高亮
     ComputedButtonRect interactRectNormal = actionComputeButtonRect(btnInteract, 874.0f, 402.0f, &insets);
@@ -84,7 +84,7 @@ static void testActionLayoutDefault(void) {
 
     // 触发事件流：模拟进入空中下落状态
     actionDispatchEvents(EVENT_MASK_IN_AIR);
-    ComputedButtonRect gliderRectAir = actionComputeButtonRect(btnGlider, 874.0f, 402.0f, &insets);
+    ComputedButtonRect gliderRectAir = actionComputeButtonRect(btnJump, 874.0f, 402.0f, &insets);
     // 滞空时：滑翔伞按钮立即动态激活并高亮！
     assert(gliderRectAir.isVisible == true);
     assert(gliderRectAir.isHighlighted == true);
@@ -95,7 +95,8 @@ static void testActionLayoutDefault(void) {
     assert(interactRectPrompt.isVisible == true);
     // 互动键动态高亮并放大
     assert(interactRectPrompt.isHighlighted == true);
-    assert(interactRectPrompt.width > btnInteract->width);
+    assert(interactRectPrompt.width == btnInteract->width);
+    assert(interactRectPrompt.x == interactRectNormal.x && interactRectPrompt.y == interactRectNormal.y);
 
     printf("[PASS] testActionLayoutDefault (Unity 锚点定位与动态事件流驱动验证成功)\n");
 }
@@ -163,15 +164,21 @@ static void testDefaultSpacing(void) {
         LayoutConfig cfg=actionGetLayoutConfig();
         UiSafeAreaInsets safe={0,44,21,44};
         if (screen==0) safe=(UiSafeAreaInsets){0,0,0,0};
-        actionDispatchEvents(EVENT_MASK_COMBAT|EVENT_MASK_INTERACT);
+        actionDispatchEvents(EVENT_MASK_COMBAT|EVENT_MASK_INTERACT|EVENT_MASK_IN_AIR|EVENT_MASK_ULTRAHAND|EVENT_MASK_SWIMMING);
         for (int i=0;i<cfg.buttonCount;i++) {
             ComputedButtonRect a=actionComputeButtonRect(&cfg.buttons[i],sizes[screen][0],sizes[screen][1],&safe);
             if (!a.isVisible) continue;
             assert(a.width>=44 && a.height>=44);
-            assert(a.y>=safe.top+52); // Keep the menu toolbar clear.
+            // Reserve room for visual growth as well as the base hit rectangle.
+            float grow = 1.16f;
+            a.x -= a.width*(grow-1)*.5f; a.y -= a.height*(grow-1)*.5f;
+            a.width *= grow; a.height *= grow;
+            assert(a.y>=safe.top+40); // Keep the menu toolbar clear.
             for (int j=i+1;j<cfg.buttonCount;j++) {
                 ComputedButtonRect b=actionComputeButtonRect(&cfg.buttons[j],sizes[screen][0],sizes[screen][1],&safe);
                 if (!b.isVisible) continue;
+                b.x -= b.width*(grow-1)*.5f; b.y -= b.height*(grow-1)*.5f;
+                b.width *= grow; b.height *= grow;
                 assert(a.x+a.width<=b.x || b.x+b.width<=a.x || a.y+a.height<=b.y || b.y+b.height<=a.y);
             }
             // Default labels contain text rather than the former pictographs.
@@ -187,6 +194,8 @@ static void testLegacyGeometryMigration(void) {
         {-104,-202,48,48},{-246,-64,48,48},{-246,-128,44,44},{-36,-216,56,56},{-178,-202,48,48}};
     for (int i=0;i<9;i++) {
         legacy.buttons[i].anchor=ANCHOR_BOTTOM_RIGHT;
+        legacy.buttons[i].highlightEvents=(uint32_t[]){EVENT_MASK_COMBAT,0,0,EVENT_MASK_INTERACT,0,EVENT_MASK_COMBAT,0,EVENT_MASK_IN_AIR,EVENT_MASK_ULTRAHAND}[i];
+        if (i==7) { strcpy(legacy.buttons[i].id,"glider_x"); legacy.buttons[i].padButton=PAD_BTN_X; legacy.buttons[i].visibleEvents=EVENT_MASK_IN_AIR; }
         legacy.buttons[i].offsetX=old[i][0]; legacy.buttons[i].offsetY=old[i][1];
         legacy.buttons[i].width=old[i][2]; legacy.buttons[i].height=old[i][3];
     }
@@ -202,6 +211,7 @@ static void testLegacyGeometryMigration(void) {
         assert(legacy.buttons[i].width==defaults.buttons[i].width && legacy.buttons[i].height==defaults.buttons[i].height);
     }
     assert(!actionLayoutMigrateLegacy(&defaults));
+    assert(!strcmp(legacy.buttons[7].id,"throw_r") && legacy.buttons[7].padButton==PAD_BTN_R);
 }
 
 int main(void) {

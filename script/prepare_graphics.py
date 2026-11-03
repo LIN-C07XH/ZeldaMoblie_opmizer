@@ -278,6 +278,50 @@ _Static_assert(sizeof(view_t) == 16, "Zelda NVNtextureView is 16 bytes");''')
 
 
 def adapt_backend(source):
+    source = source.replace('static void up_blit_add(', '#include "nvn_upload_lifetime.inc"\nstatic void up_blit_add(')
+    source = source.replace('    g_up_blits[g_nup_blits++] = (up_blit){',
+                            '    retainUploadResources(g_up_texs, src, dst);\n    g_up_blits[g_nup_blits++] = (up_blit){')
+    old_m3_block = '''enum { M3_BUFS = 512 };
+static struct { uint64_t gpu, len; __unsafe_unretained id<MTLBuffer> buf; } g_m3_bufs[M3_BUFS]; static int g_m3_nbufs; static os_unfair_lock g_m3_lk = OS_UNFAIR_LOCK_INIT;
+static void m3_buf_add(id<MTLBuffer> b) { os_unfair_lock_lock(&g_m3_lk); if (g_m3_nbufs < M3_BUFS) { g_m3_bufs[g_m3_nbufs].gpu = b.gpuAddress; g_m3_bufs[g_m3_nbufs].len = b.length; g_m3_bufs[g_m3_nbufs++].buf = b; } os_unfair_lock_unlock(&g_m3_lk); }
+static void m3_buf_del(id b) { os_unfair_lock_lock(&g_m3_lk); for (int i = 0; i < g_m3_nbufs; i++) if (g_m3_bufs[i].buf == b) { g_m3_bufs[i] = g_m3_bufs[--g_m3_nbufs]; break; } os_unfair_lock_unlock(&g_m3_lk); }
+static id<MTLBuffer> m3_buf(uint64_t gpu, NSUInteger *off) {
+    static _Thread_local int last; id<MTLBuffer> r = nil; *off = 0; if (!gpu) return nil;
+    os_unfair_lock_lock(&g_m3_lk);
+    int i = last < g_m3_nbufs && gpu >= g_m3_bufs[last].gpu && gpu - g_m3_bufs[last].gpu < g_m3_bufs[last].len ? last : -1;
+    for (int k = 0; i < 0 && k < g_m3_nbufs; k++) if (gpu >= g_m3_bufs[k].gpu && gpu - g_m3_bufs[k].gpu < g_m3_bufs[k].len) i = k;
+    if (i >= 0) { last = i; r = g_m3_bufs[i].buf; *off = (NSUInteger)(gpu - g_m3_bufs[i].gpu); }
+    os_unfair_lock_unlock(&g_m3_lk);
+    return r;
+}'''
+    new_m3_block = '''enum { M3_BUFS = 8192 };
+static struct { uint64_t gpu, len; __unsafe_unretained id<MTLBuffer> buf; } g_m3_bufs[M3_BUFS]; static int g_m3_nbufs; static os_unfair_lock g_m3_lk = OS_UNFAIR_LOCK_INIT;
+static void m3_buf_add(id<MTLBuffer> b) { os_unfair_lock_lock(&g_m3_lk); if (g_m3_nbufs < M3_BUFS) { g_m3_bufs[g_m3_nbufs].gpu = b.gpuAddress; g_m3_bufs[g_m3_nbufs].len = b.length; g_m3_bufs[g_m3_nbufs++].buf = b; } else { static int warnedOnce; if (!warnedOnce++) MLOG("【红】m3_buf_add 缓冲区表溢出 (%d / %d)！", g_m3_nbufs, (int)M3_BUFS); } os_unfair_lock_unlock(&g_m3_lk); }
+static void m3_buf_del(id b) { os_unfair_lock_lock(&g_m3_lk); for (int i = 0; i < g_m3_nbufs; i++) if (g_m3_bufs[i].buf == b) { g_m3_bufs[i] = g_m3_bufs[--g_m3_nbufs]; break; } os_unfair_lock_unlock(&g_m3_lk); }
+static id<MTLBuffer> m3_buf(uint64_t gpu, NSUInteger *off) {
+    static _Thread_local int last[4] = {-1, -1, -1, -1};
+    id<MTLBuffer> r = nil; *off = 0; if (!gpu) return nil;
+    os_unfair_lock_lock(&g_m3_lk);
+    int i = -1;
+    for (int m = 0; m < 4; m++) {
+        int idx = last[m];
+        if (idx >= 0 && idx < g_m3_nbufs && gpu >= g_m3_bufs[idx].gpu && gpu - g_m3_bufs[idx].gpu < g_m3_bufs[idx].len) {
+            i = idx; break;
+        }
+    }
+    for (int k = 0; i < 0 && k < g_m3_nbufs; k++) {
+        if (gpu >= g_m3_bufs[k].gpu && gpu - g_m3_bufs[k].gpu < g_m3_bufs[k].len) { i = k; break; }
+    }
+    if (i >= 0) {
+        last[3] = last[2]; last[2] = last[1]; last[1] = last[0]; last[0] = i;
+        r = g_m3_bufs[i].buf; *off = (NSUInteger)(gpu - g_m3_bufs[i].gpu);
+    }
+    os_unfair_lock_unlock(&g_m3_lk);
+    return r;
+}'''
+    if source.count(old_m3_block) != 1:
+        raise ValueError('M3_BUFS block not found or changed')
+    source = source.replace(old_m3_block, new_m3_block)
     cpu_texture = '''t->mem && t->d.target != NVN_TEXTURE_TARGET_BUFFER &&
             (t->has_layout || (t->pool && (t->pool->flags &
                 (NVN_MEMORY_POOL_FLAGS_CPU_CACHED | NVN_MEMORY_POOL_FLAGS_CPU_UNCACHED))))'''
@@ -355,8 +399,9 @@ def adapt_backend(source):
     MLOG("Inline uniforms deferred=%llu snapshot_draws=%llu flush_batches=%llu", (unsigned long long)z_inline_deferred,
         (unsigned long long)z_inline_snapshots, (unsigned long long)z_inline_flushes);
     MLOG("8-bit indices: expanded=%llu reused=%llu", (unsigned long long)z_index_expansions, (unsigned long long)z_index_hits);
-    MLOG("Shader prefetch: compiled=%llu waits=%llu wait_ms=%.1f compiled_before_worker=%llu", (unsigned long long)z_prefetch_compiled,
-        (unsigned long long)z_prefetch_waits, z_prefetch_wait_ns / 1e6, (unsigned long long)z_prefetch_started_late);''',
+    MLOG("Shader prefetch: compiled=%llu waits=%llu wait_ms=%.1f compiled_before_worker=%llu retained_library_hits=%llu", (unsigned long long)z_prefetch_compiled,
+        (unsigned long long)z_prefetch_waits, z_prefetch_wait_ns / 1e6, (unsigned long long)z_prefetch_started_late,
+        (unsigned long long)atomic_load(&PREFETCH_LIBRARY_HITS));''',
         '        heap_mb, heap_free_mb, heap_maxblk_kb, heap_ok ? "" : "（\u672a\u8bfb\u5230）", avail);':
         '''        heap_mb, heap_free_mb, heap_maxblk_kb, heap_ok ? "" : "（\u672a\u8bfb\u5230）", avail);
     MLOG("Upload texture reuse through frame %llu: hits=%llu retained=%llu KiB / 16384 KiB", frame,
@@ -412,6 +457,17 @@ def adapt_backend(source):
         '#include "nvn_shader_prefetch.inc"\nstatic NvShader *shader_get(NSString *pc, int stage) {',
         'uint64_t bt = bp_now(); o = shader_load(pc, stage);':
         'uint64_t bt = bp_now(); zelda_prefetch_wait(pc); o = shader_load(pc, stage);',
+        'static struct { pso_key k; id<MTLRenderPipelineState> ps; int used, done; } g_pp[PSO_PEND_MAX];':
+        'static struct { pso_key k; id<MTLRenderPipelineState> ps; NSOperation *operation; int used, done; } g_pp[PSO_PEND_MAX];',
+        '    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{\n        NSError *e = nil; id<MTLRenderPipelineState> ps = [g_dev newRenderPipelineStateWithDescriptor:d error:&e];\n        pthread_mutex_lock(&g_pp_mu); g_pp[slot].ps = ps; g_pp[slot].done = 1; pthread_cond_broadcast(&g_pp_cv); pthread_mutex_unlock(&g_pp_mu);\n    });':
+        '''    NSBlockOperation *operation = [NSBlockOperation blockOperationWithBlock:^{ @autoreleasepool {
+        NSError *e = nil; id<MTLRenderPipelineState> ps = [g_dev newRenderPipelineStateWithDescriptor:d error:&e];
+        pthread_mutex_lock(&g_pp_mu); g_pp[slot].ps = ps; g_pp[slot].done = 1; pthread_cond_broadcast(&g_pp_cv); pthread_mutex_unlock(&g_pp_mu);
+    } }];
+    pthread_mutex_lock(&g_pp_mu); g_pp[slot].operation = operation; pthread_mutex_unlock(&g_pp_mu);
+    [shaderCompileQueue() addOperation:operation];''',
+        '    if (at >= 0) { while (!g_pp[at].done) pthread_cond_wait(&g_pp_cv, &g_pp_mu); ps = g_pp[at].ps; g_pp[at].ps = nil; g_pp[at].used = 0; }':
+        '    if (at >= 0) { g_pp[at].operation.queuePriority = NSOperationQueuePriorityVeryHigh; while (!g_pp[at].done) pthread_cond_wait(&g_pp_cv, &g_pp_mu); ps = g_pp[at].ps; g_pp[at].ps = nil; g_pp[at].operation = nil; g_pp[at].used = 0; }',
         # Metal restarts at 0xFFFF / 0xFFFFFFFF (8-bit indices are expanded to 16 bits, staying below 0x100).
         '        if (di->count) enc_r_draw_indexed(en, mp, di->count,':
         '''        if (S.restart && (di->itype == 0 ? S.restart_index <= 0xff : di->itype == 1 ? S.restart_index < 0xffff : S.restart_index != 0xffffffffu)) {
@@ -425,10 +481,11 @@ def adapt_backend(source):
 #endif
         if (di->count) enc_r_draw_indexed(en, mp, di->count,''',
         'static id<MTLLibrary> lib_from_file(NSString *path, NSError **err) {':
-        '#include "nvn_shader_math.h"\n#include "shader_prep.h"\nstatic id<MTLLibrary> lib_from_file(NSString *path, NSError **err) {',
+        '#include "nvn_shader_math.h"\n#include "shader_prep.h"\n#include "nvn_library_cache.inc"\nstatic id<MTLLibrary> lib_from_file(NSString *path, NSError **err) {',
         'if (len < 4 || memcmp(m, "MTLB", 4)) { NSString *src =':
         '''if (len < 4 || memcmp(m, "MTLB", 4)) {
-        id<MTLLibrary> cached = shader_ir_load(g_dev, path, m, len, false);
+        id<MTLLibrary> cached = takePrefetchedLibrary(path, m, len);
+        if (!cached) cached = shader_ir_load(g_dev, path, m, len, false);
         if (cached) { munmap(m, len); return cached; }
         NSString *src =''',
         'id<MTLLibrary> l = [g_dev newLibraryWithSource:src options:nil error:err];':
@@ -1145,6 +1202,11 @@ static void bind_args(id<MTLCommandEncoder> en, int nvn_stage, int metal_vertex,
     source, shader_builds = re.subn(
         r'\[g_dev new(?:LibraryWithSource|RenderPipelineStateWithDescriptor|ComputePipelineStateWithFunction):.*?\berror:&?\w+\]',
         lambda match: 'ZELDA_SHADER_BUILD(' + match[0] + ')', source, flags=re.S)
+    source = re.sub(r'\[g_dev newRenderPipelineStateWithDescriptor:(.*?) error:(&?\w+)\]',
+                    r'cachedRenderPipeline(g_dev, \1, \2)', source, flags=re.S)
+    source = re.sub(r'\[g_dev newComputePipelineStateWithFunction:(.*?) error:(&?\w+)\]',
+                    r'cachedComputePipeline(g_dev, \1, \2)', source, flags=re.S)
+    source = source.replace('#include "nvn_mtl.h"', '#include "nvn_mtl.h"\n#include "dmsh_chain.h"\n#include "ios_pipeline_cache.inc"')
     if shader_builds != 20:
         raise ValueError('NVN shader compilation call sites changed')
     source = '#include "timeline.h"\n#include "shader_status.h"\n' + source
@@ -1248,8 +1310,9 @@ if __name__ == '__main__':
     shader_chain = target.with_name('dmsh_chain.h')
     shader_chain.write_text(f'#define DMSH_CHAIN "{chain()}"\n')
     from build_shader_ir import contract
+    from prepare_ios_shader_ir import iosIrContract
     ir_identity = target.with_name('shader_ir_identity.h')
-    ir_identity.write_text(f'#define ZELDA_SHADER_IR_CONTRACT "{contract()}"\n')
+    ir_identity.write_text(f'#define ZELDA_SHADER_IR_CONTRACT "{contract()}"\n#define IOS_SHADER_IR_CONTRACT "{iosIrContract()}"\n')
     # Overlay all includes consistently, including those inside the unmodified Metal backend.
     target.with_name('graphics-overlay.json').write_text(json.dumps({'version': 0, 'roots': [
         {'type': 'file', 'name': str((gfx / 'nvn/nvn_obj.h').resolve()), 'external-contents': str(objects.resolve())},

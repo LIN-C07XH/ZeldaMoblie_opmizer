@@ -8,7 +8,7 @@ typedef enum {
     ASPECT_MODE_FIT = 0,     // 等比适应（保留黑边，完整显示原画面）
     ASPECT_MODE_FILL = 1,    // Equal-scale fill; excess image is cropped, not a wider game FOV.
     ASPECT_MODE_STRETCH = 2, // 拉伸充满
-    ASPECT_MODE_NATIVE_WIDE = 3 // native wide output; preserve the whole game image
+    ASPECT_MODE_NATIVE_WIDE = 3 // native render target and camera projection match the display
 } ScreenAspectMode;
 
 /// 视口参数计算结果
@@ -44,10 +44,11 @@ static inline ScreenViewport screenAspectViewport(float sw, float sh, float gw, 
     ScreenViewport vp = {0, 0, 0, 0, 1, 1};
     if (!isfinite(sw) || !isfinite(sh) || !isfinite(gw) || !isfinite(gh) || sw<=0 || sh<=0 || gw<=0 || gh<=0) return vp;
     float sx=sw/gw, sy=sh/gh;
-    // Native sizes are aligned to eight pixels. Correct only that sub-percent
-    // rounding; if native negotiation failed, retain a complete fitted image.
+    // A native wide camera requires a matching wide render target. Never hide
+    // missing native negotiation by stretching a 16:9 image. Equal-scale fill
+    // only removes the few pixels introduced by the native 8-pixel alignment.
     if (mode==ASPECT_MODE_NATIVE_WIDE && fabsf((sw/sh)/(gw/gh)-1)<.01f)
-        return (ScreenViewport){0,0,sw,sh,sx,sy};
+        mode=ASPECT_MODE_FILL;
     if (mode==ASPECT_MODE_STRETCH) return (ScreenViewport){0,0,sw,sh,sx,sy};
     float scale=mode==ASPECT_MODE_FILL ? fmaxf(sx,sy) : fminf(sx,sy);
     vp.width=roundf(gw*scale); vp.height=roundf(gh*scale);

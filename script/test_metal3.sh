@@ -3,6 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p work/tmp
 export TMPDIR="$PWD/work/tmp/"
+export ZELDA_PIPELINE_CACHE=0
 binary=work/tmp/test_nvn_m3_index
 uniform_binary=work/tmp/test_nvn_m3_uniform
 metalfx_binary=work/tmp/test_nvn_m3_metalfx

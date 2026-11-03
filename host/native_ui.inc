@@ -1,4 +1,5 @@
 #include "action_layout.h"
+#include "camera_controller.h"
 #include <stddef.h>
 #include <math.h>
 
@@ -258,8 +259,45 @@ static uint64_t nativeUiDrawKey(void *pane) {
     return 1;
 }
 
+// The UI owns a DrawInfo projection independently of scene cameras. Layout::Draw
+// supplies it before native SetLayout invalidates material/draw state. Fit the
+// observed, centered 1920x1080 design canvas without touching pane transforms.
+static bool nativeUiFitProjection(void *drawInfo) {
+    if (nativeUiLoad64(drawInfo, 0) != nativeUiApi.base + 0x391ae68) return false;
+    float width, height;
+    cameraGetDisplaySize(&width, &height);
+    if (!isfinite(width) || !isfinite(height) || width <= 0 || height <= 0) return false;
+    float aspect = width / height;
+    if (fabsf(aspect - 16.f/9) < .01f) return false;
+    float matrix[16];
+    memcpy(matrix, (char *)drawInfo+0x10, sizeof matrix);
+    for (unsigned i=0; i<16; i++) if (!isfinite(matrix[i])) return false;
+    const unsigned zero[] = {1,2,3,4,6,7,8,9,12,13,14};
+    for (unsigned i=0; i<sizeof zero/sizeof *zero; i++)
+        if (fabsf(matrix[zero[i]]) > .000001f) return false;
+    if (fabsf(matrix[15]-1) > .000001f) return false;
+    float x=1.f/960, y=1.f/540;
+    if (aspect > 16.f/9) x=y/aspect; else y=x*aspect;
+    bool original = fabsf(matrix[0]*960-1)<.0001f && fabsf(matrix[5]*540-1)<.0001f;
+    bool fitted = fabsf(matrix[0]/x-1)<.0001f && fabsf(matrix[5]/y-1)<.0001f;
+    if (!original || fitted) return false;
+    memcpy((char *)drawInfo+0x10, &x, sizeof x);
+    memcpy((char *)drawInfo+0x24, &y, sizeof y);
+#ifdef LOG
+    static bool reported;
+    pthread_mutex_lock(&nativeUiLock);
+    if (!reported) {
+        reported=true;
+        LOG("UI_PROJECTION centered 1920x1080 canvas fitted to %.0fx%.0f; pixel_scale=%.6f",width,height,x*width/(y*height));
+    }
+    pthread_mutex_unlock(&nativeUiLock);
+#endif
+    return true;
+}
+
 static uint64_t nativeUiCallback(uint32_t kind, void *object, uint64_t value) {
     if (!object) return 0;
+    if (kind == 4) { nativeUiFitProjection(object); return 0; }
     if (kind == 3) {
         pthread_mutex_lock(&nativeUiLock); nativeUiState.draws++; pthread_mutex_unlock(&nativeUiLock);
         if (!cameraIsGameplayActive()) return 0;

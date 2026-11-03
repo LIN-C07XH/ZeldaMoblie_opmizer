@@ -89,3 +89,21 @@ Many other `ZELDA_*` and `DM_*` switches exist for A/B comparisons of individual
 4. Update the English and Chinese documentation together.
 
 Contributions are accepted under the [Apache License 2.0](../LICENSE), the license of this repository.
+
+### iOS touch and cutscene regression checks
+
+Touch sticks use UIKit tracking without haptic feedback. Standard actions stay visible while the native UI bridge is idle; context changes enlarge them in place. Native widescreen covers both initial allocation and later resolution selection. The logical crop, view rectangles, UI canvas and player camera share the same aspect; presentation is uniform. SetResolution does not expand the fixed NVN display texture, so the logical crop must remain within its original bounds. A mode change after startup is saved for the next app launch.
+
+`prepare_ios_shader_support.py` bundles every validated offline variant request and its base stages, as well as the movie programs. On-device logs reporting `Captured Zelda ... variant` followed by `Shader translation is required on the Mac` identify missing scene resources, including after a cutscene. Rebuild the support set and app; the phone validates and repairs the matching cache on launch. A successful build verifies coverage and integrity, not a full gameplay run.
+
+Joystick SDK dispatch is checked by `DEVELOPER_DIR=/path/to/Xcode/Contents/Developer bash script/test_ios_touch_controls.sh <booted-simulator-UDID>`. The test calls through UIControl's real tracking selectors, verifying override dispatch, value events, clamping, release and cancellation. C input tests alone cannot detect a misspelled UIKit callback.
+
+## Desktop shader compilation and stutter
+
+Mac retains on-demand MSL compilation and runtime guest-shader translation. It does not require the complete iOS offline IR bundle. Recorded shaders and pipelines still warm at startup. Prefetch retains up to 128 libraries with a 32 MiB source-cost budget, so draws reuse matching library objects instead of requesting source compilation again. Changed source contents invalidate a cached entry.
+
+`host/pipeline_cache.inc` shares the `MTLBinaryArchive` adapter between Mac and iOS. Desktop archives live in `work/shaders/pipeline_cache/` under `DM_MSL_DIR`, isolated by GPU, OS, shader chain and source-transform contract. Missing or corrupt caches fall back to normal compilation. Capture and delayed persistence run on a serial Utility queue, without changing caller-owned descriptors. Mac reads and publishes archives of at most 8 MiB and captures at most 128 pipeline creations per run. Over-budget archives fall back to the system driver cache before entering Metal: macOS 15 can expand large serialized archives into multiple GiB during loading and stall startup. Capture reservations use an atomic counter so draws never wait for the archive mutex. `PIPELINE_CACHE` logs report load, hit, miss and save events; set `ZELDA_PIPELINE_CACHE=0` for comparison.
+
+`ZELDA_SHADER_COMPILE_JOBS` defaults to 2 and clamps to 1–4 for each startup warm-up, library-prefetch and predicted-pipeline queue. Prediction uses Utility priority; a pipeline needed by the current draw moves ahead of queued predictions. Lower concurrency trades cold compilation throughput for CPU capacity for audio, input and the desktop. Previously unseen shaders or variants must still finish compiling before correct drawing, so first encounters can still stall. Draws are not skipped or rendered with substitute shaders.
+
+Run `work/venv/bin/python -m unittest discover -s tests -p test_desktop_updates.py -v` and `bash script/test_metal3.sh`. The desktop tests use temporary directories for cloud lifecycle ordering, compiler concurrency and priority, prefetched-library GPU output, and cross-process archive hits and corruption recovery. They do not access real saves.

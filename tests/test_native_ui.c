@@ -10,6 +10,8 @@ static InputDevice device = INPUT_DEVICE_KEYBOARD_MOUSE;
 static double cameraNow(void) { return testTime; }
 bool cameraIsGameplayActive(void) { return gameplay; }
 InputDevice inputGetDevice(void) { return device; }
+static float displayWidth=1920, displayHeight=1080;
+void cameraGetDisplaySize(float *width, float *height) { *width=displayWidth; *height=displayHeight; }
 #include "native_ui.inc"
 
 static int rebuilds, boardCalls;
@@ -35,6 +37,40 @@ static uint32_t string(void *manager, const char **out, const NativeUiBlackboard
     assert(manager && ref->object == 1 && key == 0xd7e9ac3a); *out = prompt; return 1;
 }
 static void store64(void *p, size_t at, uint64_t value) { memcpy((char *)p + at, &value, 8); }
+static void uiProjection(void) {
+    unsigned char context[0x1c0] = {0};
+    nativeUiApi.base = 0x10000000;
+    store64(context,0,nativeUiApi.base+0x391ae68);
+    const float original[16]={1.f/960,0,0,0, 0,1.f/540,0,0, 0,0,-1.f/150,-1, 0,0,0,1};
+    memcpy(context+0x10,original,sizeof original);
+    assert(!nativeUiFitProjection(context)); // original 16:9 mode
+    const float sizes[][2]={{1912,880},{1440,1080},{2344,1000}};
+    for (unsigned i=0;i<sizeof sizes/sizeof *sizes;i++) {
+        displayWidth=sizes[i][0]; displayHeight=sizes[i][1];
+        memcpy(context+0x10,original,sizeof original);
+        gameplay=false; // title and initial menus have no active player camera
+        nativeUiCallback(4,context,0);
+        float matrix[16]; memcpy(matrix,context+0x10,sizeof matrix);
+        assert(fabsf(matrix[0]*displayWidth/(matrix[5]*displayHeight)-1)<.00001f);
+        assert(matrix[0]<=original[0]+.0000001f && matrix[5]<=original[5]+.0000001f); // full design canvas fits
+        for (unsigned j=0;j<16;j++) if (j!=0 && j!=5) assert(matrix[j]==original[j]);
+        assert(!nativeUiFitProjection(context)); // repeated layouts do not shrink the canvas again
+    }
+    gameplay=true; displayWidth=1912; displayHeight=880;
+    for (unsigned rejected=0;rejected<5;rejected++) {
+        memcpy(context+0x10,original,sizeof original);
+        store64(context,0,nativeUiApi.base+0x391ae68);
+        float changed=0;
+        if (rejected==0) store64(context,0,nativeUiApi.base+0x3902460); // scene/offscreen OrthoProjection
+        if (rejected==1) { changed=.01f; memcpy(context+0x1c,&changed,4); } // cropped/offset UI canvas
+        if (rejected==2) { changed=1.f/640; memcpy(context+0x10,&changed,4); } // different design canvas
+        if (rejected==3) memcpy(context+0x4c,&changed,4); // perspective m33
+        if (rejected==4) { changed=NAN; memcpy(context+0x24,&changed,4); }
+        unsigned char before[sizeof context]; memcpy(before,context,sizeof context);
+        assert(!nativeUiFitProjection(context)); assert(!memcmp(before,context,sizeof context));
+    }
+    displayWidth=1920; displayHeight=1080;
+}
 static void labels(void) {
     NativeUiTextSpan span;
     memset(&span, 0x55, sizeof span);
@@ -206,6 +242,7 @@ static void drawKeys(void) {
 }
 
 int main(void) {
+    uiProjection();
     labels(); events(); contextual(); drawKeys(); binding();
     puts("Native UI: borrowed UTF-16 spans, device restoration, native guide events, typed interaction query, expiry and binding passed");
 }
